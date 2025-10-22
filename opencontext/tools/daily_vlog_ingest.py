@@ -16,7 +16,6 @@ Usage (after copying the day's video files into videos/DD-MM/):
 import argparse
 import asyncio
 import datetime as dt
-import logging
 import os
 import re
 import shutil
@@ -32,8 +31,9 @@ from opencontext.context_consumption.generation.generation_report import ReportG
 from opencontext.models.context import RawContextProperties
 from opencontext.models.enums import ContentFormat, ContextSource
 from opencontext.server.opencontext import OpenContext
+from opencontext.utils.logging_utils import get_logger, setup_logging
 
-LOG = logging.getLogger("daily_vlog_ingest")
+LOG = get_logger("daily_vlog_ingest")
 SUPPORTED_VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".m4v")
 
 
@@ -127,7 +127,7 @@ def prepare_output_root(base_dir: Path, date_str: str, clean: bool) -> Path:
     """Create (and optionally clear) the folder that holds sampled frames for the day."""
     day_dir = base_dir / date_str
     if clean and day_dir.exists():
-        LOG.info("Removing existing frame directory %s", day_dir)
+        LOG.info(f"Removing existing frame directory {day_dir}")
         shutil.rmtree(day_dir)
     day_dir.mkdir(parents=True, exist_ok=True)
     return day_dir
@@ -198,7 +198,7 @@ def run_ffmpeg_extract(video_path: Path, output_dir: Path, interval: int) -> Non
         "2",
         str(pattern),
     ]
-    LOG.debug("Running ffmpeg: %s", " ".join(cmd))
+    LOG.debug(f"Running ffmpeg: {' '.join(cmd)}")
     subprocess.run(cmd, check=True)
 
 
@@ -248,8 +248,7 @@ def collect_frames(
         start_dt = video_start_times.get(video_path)
         if start_dt is None:
             LOG.warning(
-                "Unable to parse start time from filename '%s'; fallback to sequential ordering.",
-                video_path.name,
+                f"Unable to parse start time from filename '{video_path.name}'; fallback to sequential ordering."
             )
             start_dt = day_start + dt.timedelta(seconds=len(records) * interval)
 
@@ -259,17 +258,17 @@ def collect_frames(
             if clean_existing and video_output_dir.exists():
                 shutil.rmtree(video_output_dir)
 
-            LOG.info("Sampling frames from %s", video_path)
+            LOG.info(f"Sampling frames from {video_path}")
             run_ffmpeg_extract(video_path, video_output_dir, interval)
         else:
             if not video_output_dir.exists():
-                LOG.warning("Frame directory %s is missing; switching to extraction.", video_output_dir)
-                LOG.info("Sampling frames from %s", video_path)
+                LOG.warning(f"Frame directory {video_output_dir} is missing; switching to extraction.")
+                LOG.info(f"Sampling frames from {video_path}")
                 run_ffmpeg_extract(video_path, video_output_dir, interval)
 
         frames = sorted(video_output_dir.glob("frame_*.jpg"))
         if not frames:
-            LOG.warning("No frames available for %s; skipping.", video_path)
+            LOG.warning(f"No frames available for {video_path}; skipping.")
             continue
 
         for idx, frame_path in enumerate(frames):
@@ -291,7 +290,7 @@ def collect_frames(
 
 
 def ingest_frames(context_lab: OpenContext, records: List[FrameRecord]) -> None:
-    LOG.info("Ingesting %d frames into the screenshot pipeline.", len(records))
+    LOG.info(f"Ingesting {len(records)} frames into the screenshot pipeline.")
     for idx, rec in enumerate(records, start=1):
         raw = RawContextProperties(
             content_format=ContentFormat.IMAGE,
@@ -307,9 +306,9 @@ def ingest_frames(context_lab: OpenContext, records: List[FrameRecord]) -> None:
         )
         success = context_lab.add_context(raw)
         if not success:
-            LOG.warning("Failed to enqueue frame %s", rec.path)
+            LOG.warning(f"Failed to enqueue frame {rec.path}")
         if idx % 50 == 0:
-            LOG.info("Queued %d/%d frames", idx, len(records))
+            LOG.info(f"Queued {idx}/{len(records)} frames")
 
 
 def wait_for_processing(context_lab: OpenContext, max_wait: int) -> None:
@@ -342,7 +341,7 @@ def wait_for_processing(context_lab: OpenContext, max_wait: int) -> None:
         time.sleep(poll_interval)
         waited += poll_interval
     else:
-        LOG.warning("Timed out after %s seconds waiting for screenshot processing.", max_wait)
+        LOG.warning(f"Timed out after {max_wait} seconds waiting for screenshot processing.")
 
 
 async def generate_daily_report(start_ts: int, end_ts: int) -> str:
@@ -360,16 +359,14 @@ def write_report(report: str, report_dir: Path, date_str: str) -> Path:
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-
-    ensure_ffmpeg_available()
-
     project_root = resolve_project_root()
     os.environ.setdefault("CONTEXT_PATH", str(project_root))
+
+    global_config = GlobalConfig.get_instance()
+    global_config.initialize(args.config)
+    setup_logging(global_config.get_config("logging") or {})
+
+    ensure_ffmpeg_available()
 
     local_tz = dt.datetime.now().astimezone().tzinfo
     date_token = args.date
@@ -389,14 +386,11 @@ def main(argv: Optional[List[str]] = None) -> int:
             break
 
     if video_dir is None:
-        LOG.error(
-            "Could not find videos for %s. Tried: %s",
-            date_val.isoformat(),
-            ", ".join(str(video_root / c) for c in folder_candidates),
-        )
+        tried = ", ".join(str(video_root / c) for c in folder_candidates)
+        LOG.error(f"Could not find videos for {date_val.isoformat()}. Tried: {tried}")
         return 1
 
-    LOG.info("Using video directory: %s", video_dir)
+    LOG.info(f"Using video directory: {video_dir}")
 
     videos = sorted(
         path
@@ -404,15 +398,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         if path.is_file() and path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
     )
     if not videos:
-        LOG.error(
-            "No supported video files found under %s (extensions: %s)",
-            video_dir,
-            ", ".join(SUPPORTED_VIDEO_EXTENSIONS),
-        )
+        supported = ", ".join(SUPPORTED_VIDEO_EXTENSIONS)
+        LOG.error(f"No supported video files found under {video_dir} (extensions: {supported})")
         return 1
 
     if args.skip_extract:
-        LOG.info("Reusing existing frames under %s", args.output_dir)
+        LOG.info(f"Reusing existing frames under {args.output_dir}")
 
     frame_root = Path(args.output_dir).expanduser().resolve()
     day_folder_name = video_dir.name
@@ -449,8 +440,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         LOG.error("No frames available for ingestion. Aborting.")
         return 1
 
-    global_config = GlobalConfig()
-    global_config.initialize(args.config)
     context_lab = OpenContext()
     context_lab.initialize()
 
@@ -460,10 +449,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     day_end = day_start + dt.timedelta(days=1)
 
     report_date_str = date_val.isoformat()
-    LOG.info("Generating daily report for %s", report_date_str)
+    LOG.info(f"Generating daily report for {report_date_str}")
     report = asyncio.run(generate_daily_report(int(day_start.timestamp()), int(day_end.timestamp())))
     output_path = write_report(report, Path(args.report_dir).expanduser().resolve(), report_date_str)
-    LOG.info("Daily report saved to %s", output_path)
+    LOG.info(f"Daily report saved to {output_path}")
 
     context_lab.shutdown(graceful=True)
     return 0

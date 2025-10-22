@@ -15,19 +15,21 @@ import argparse
 import asyncio
 import datetime as dt
 import os
-import sys
 import time
 from pathlib import Path
 from typing import Iterable, List, Optional
 
 from opencontext.config.global_config import GlobalConfig
 from opencontext.server.opencontext import OpenContext
-from opencontext.tools import daily_vlog_ingest as vlog_ingest
-from opencontext.tools import whisperx_transcribe as whisper_tool
-from opencontext.utils.logging_utils import get_logger
+from opencontext.utils.logging_utils import get_logger, setup_logging
 
 logger = get_logger(__name__)
 
+logger.info("Loaded context tool module.")
+from opencontext.tools import daily_vlog_ingest as vlog_ingest
+logger.info("Loaded vlog ingest module.")
+from opencontext.tools import whisperx_transcribe as whisper_tool
+logger.info("Loaded whisperx tool module.")
 
 def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -154,34 +156,40 @@ def wait_for_processor(context_lab: OpenContext, processor_name: str, max_wait: 
     """Wait until the specified processor drains its queue or timeout."""
     processor = context_lab.processor_manager.get_processor(processor_name)
     if processor is None:
-        logger.debug("Processor %s not registered; skipping wait.", processor_name)
+        logger.debug(f"Processor {processor_name} not registered; skipping wait.")
         return
 
     poll_interval = 5
     waited = 0
     consecutive_idle = 0
+    last_reported_size: Optional[int] = None
 
     while waited < max_wait:
         queue_obj = getattr(processor, "_input_queue", None)
         processing_thread = getattr(processor, "_processing_task", None)
         remaining = queue_obj.qsize() if queue_obj is not None else 0
 
+        if remaining != last_reported_size:
+            plural_suffix = "s" if remaining != 1 else ""
+            logger.info(f"{processor_name} queue backlog: {remaining} item{plural_suffix} remaining")
+            last_reported_size = remaining
+
         if remaining == 0:
             consecutive_idle += 1
             if consecutive_idle >= 3:
-                logger.info("%s queue is idle.", processor_name)
+                logger.info(f"{processor_name} queue is idle.")
                 break
         else:
             consecutive_idle = 0
 
         if processing_thread and not processing_thread.is_alive():
-            logger.info("%s background thread has exited.", processor_name)
+            logger.info(f"{processor_name} background thread has exited.")
             break
 
         time.sleep(poll_interval)
         waited += poll_interval
     else:
-        logger.warning("Timed out after %s seconds waiting for %s.", max_wait, processor_name)
+        logger.warning(f"Timed out after {max_wait} seconds waiting for {processor_name}.")
 
 
 def resolve_videos_for_date(date_val: dt.date, original_token: Optional[str]) -> Optional[Path]:
@@ -192,16 +200,21 @@ def resolve_videos_for_date(date_val: dt.date, original_token: Optional[str]) ->
         candidate_path = video_root / candidate
         if candidate_path.exists():
             return candidate_path
-    logger.error(
-        "Could not find videos for %s. Tried: %s",
-        date_val.isoformat(),
-        ", ".join(str(video_root / c) for c in folder_candidates),
-    )
+    tried_paths = ", ".join(str(video_root / c) for c in folder_candidates)
+    logger.error(f"Could not find videos for {date_val.isoformat()}. Tried: {tried_paths}")
     return None
 
 
 def main(argv: Optional[Iterable[str]] = None) -> int:
     args = parse_args(argv)
+
+    project_root = vlog_ingest.resolve_project_root()
+    os.environ.setdefault("CONTEXT_PATH", str(project_root))
+
+    global_config = GlobalConfig.get_instance()
+    global_config.initialize(args.config)
+    setup_logging(global_config.get_config("logging") or {})
+    logger.info("Initialized logging for vlog pipeline.")
 
     try:
         vlog_ingest.ensure_ffmpeg()
@@ -216,12 +229,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         # WhisperX also requires ffmpeg; reuse the same check to provide clearer errors.
         try:
             whisper_tool.ensure_ffmpeg()
+            logger.debug("WhisperX dependencies are satisfied.")
         except RuntimeError as exc:
             logger.error(str(exc))
             return 1
-
-    project_root = vlog_ingest.resolve_project_root()
-    os.environ.setdefault("CONTEXT_PATH", str(project_root))
 
     local_tz = dt.datetime.now().astimezone().tzinfo
     date_token = args.date or ""
@@ -240,12 +251,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         for path in video_dir.iterdir()
         if path.is_file() and path.suffix.lower() in vlog_ingest.SUPPORTED_VIDEO_EXTENSIONS
     )
+    logger.info(f"Found {len(videos)} video files under {video_dir}")
     if not videos:
-        logger.error(
-            "No supported video files found under %s (extensions: %s)",
-            video_dir,
-            ", ".join(vlog_ingest.SUPPORTED_VIDEO_EXTENSIONS),
-        )
+        extensions = ", ".join(vlog_ingest.SUPPORTED_VIDEO_EXTENSIONS)
+        logger.error(f"No supported video files found under {video_dir} (extensions: {extensions})")
         return 1
 
     frame_root = args.output_dir.expanduser().resolve()
@@ -268,7 +277,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
     if not video_start_times:
         logger.warning("Failed to infer start times from filenames; frames will be ordered sequentially.")
-
+    logger.info(f"Starting frame extraction for {date_val.isoformat()}")
     records = vlog_ingest.collect_frames(
         videos=videos,
         day_output_dir=day_output_dir,
@@ -309,7 +318,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         hf_token=args.hf_token,
                     )
                 except Exception as exc:  # pragma: no cover - runtime errors
-                    logger.exception("Transcription failed for %s: %s", media_path, exc)
+                    logger.exception(f"Transcription failed for {media_path}: {exc}")
                     exit_code = 1
                     continue
 
@@ -320,7 +329,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                         payload,
                     )
                     transcript_outputs.append(output_path)
-                    logger.info("Transcript saved to %s", output_path)
+                    logger.info(f"Transcript saved to {output_path}")
 
                 if not args.no_transcript_ingest:
                     whisper_tool.ingest_transcript(context_lab, media_path, payload)
@@ -329,7 +338,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
         day_end = day_start + dt.timedelta(days=1)
         report_date_str = date_val.isoformat()
-        logger.info("Generating daily report for %s", report_date_str)
+        logger.info(f"Generating daily report for {report_date_str}")
         report = asyncio.run(
             vlog_ingest.generate_daily_report(
                 int(day_start.timestamp()),
@@ -341,10 +350,10 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
             args.report_dir.expanduser().resolve(),
             report_date_str,
         )
-        logger.info("Daily report saved to %s", output_path)
+        logger.info(f"Daily report saved to {output_path}")
 
         if transcript_outputs:
-            logger.info("Saved %d transcript files under %s", len(transcript_outputs), args.transcript_dir)
+            logger.info(f"Saved {len(transcript_outputs)} transcript files under {args.transcript_dir}")
     finally:
         context_lab.shutdown(graceful=True)
 
@@ -352,4 +361,4 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
