@@ -1,7 +1,7 @@
 <div align="center">
 
 <picture>
-  <img alt="MineContext" src="src/MineContext-Banner.svg" width="100%" height="auto">
+  <img alt="MineContext" src="src/MineContext-glass.png" width="100%" height="auto">
 </picture>
 
 ### MineContext Glass: Full-Spectrum Personal Context OS
@@ -12,6 +12,7 @@ Built on ByteDance's [MineContext](https://github.com/volcengine/MineContext), e
 
 ## Table of Contents
 
+- [Table of Contents](#table-of-contents)
 - [Vision](#vision)
 - [Current Capabilities](#current-capabilities)
 - [Roadmap](#roadmap)
@@ -20,6 +21,7 @@ Built on ByteDance's [MineContext](https://github.com/volcengine/MineContext), e
   - [Installation](#installation)
   - [Configuration](#configuration)
   - [Start the Pipeline](#start-the-pipeline)
+  - [Daily Vlog Ingest](#daily-vlog-ingest)
 - [Architecture](#architecture)
 - [Contributing](#contributing)
 - [License](#license)

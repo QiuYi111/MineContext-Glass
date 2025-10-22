@@ -1,7 +1,7 @@
 <div align="center">
 
 <picture>
-  <img alt="MineContext" src="src/MineContext-Banner.svg" width="100%" height="auto">
+  <img alt="MineContext" src="src/MineContext-glass.png" width="100%" height="auto">
 </picture>
 
 ### MineContext Glass：全景个人上下文操作系统
@@ -12,6 +12,7 @@
 
 ## 目录
 
+- [目录](#目录)
 - [愿景](#愿景)
 - [当前能力](#当前能力)
 - [路线图](#路线图)
@@ -20,6 +21,7 @@
   - [安装](#安装)
   - [配置](#配置)
   - [启动管线](#启动管线)
+  - [日常 vlog 批处理](#日常-vlog-批处理)
 - [架构总览](#架构总览)
 - [参与贡献](#参与贡献)
 - [许可证](#许可证)
