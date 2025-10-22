@@ -8,7 +8,7 @@
 Batch ingest a day's vlog videos by sampling frames and feeding them into the
 existing screenshot processing pipeline, then emit the daily summary report.
 
-Usage (after copying the day's mp4 files into videos/DD-MM/):
+Usage (after copying the day's video files into videos/DD-MM/):
 
     uv run python -m opencontext.tools.daily_vlog_ingest
 """
@@ -34,6 +34,7 @@ from opencontext.models.enums import ContentFormat, ContextSource
 from opencontext.server.opencontext import OpenContext
 
 LOG = logging.getLogger("daily_vlog_ingest")
+SUPPORTED_VIDEO_EXTENSIONS = (".mp4", ".mov", ".avi", ".mkv", ".m4v")
 
 
 @dataclass
@@ -392,9 +393,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     LOG.info("Using video directory: %s", video_dir)
 
-    videos = sorted(video_dir.glob("*.mp4"))
+    videos = sorted(
+        path
+        for path in video_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in SUPPORTED_VIDEO_EXTENSIONS
+    )
     if not videos:
-        LOG.error("No mp4 files found under %s", video_dir)
+        LOG.error(
+            "No supported video files found under %s (extensions: %s)",
+            video_dir,
+            ", ".join(SUPPORTED_VIDEO_EXTENSIONS),
+        )
         return 1
 
     if args.skip_extract:
