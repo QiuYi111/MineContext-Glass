@@ -90,6 +90,7 @@ class ContextProcessorManager:
             ContextSource.SCREENSHOT: "screenshot_processor",
             ContextSource.FILE: "document_processor",
             ContextSource.VAULT: "document_processor",
+            ContextSource.TEXT: "document_processor",
         }
         self._default_chain_by_format = {}
     

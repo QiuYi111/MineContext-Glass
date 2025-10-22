@@ -21,6 +21,7 @@ from opencontext.utils.logging_utils import get_logger
 from opencontext.context_processing.chunker.chunkers import (
     BaseChunker, StructuredFileChunker, FAQChunker
 )
+from opencontext.context_processing.chunker.simple_text_chunker import SimpleTextChunker
 from opencontext.context_processing.chunker.llm_document_chunker import LLMDocumentChunker
 
 
@@ -59,6 +60,8 @@ class DocumentProcessor(BaseContextProcessor):
             FileType.JSONL: structured_chunker,
             FileType.PARQUET: structured_chunker,
         }
+
+        self.simple_text_chunker = SimpleTextChunker()
 
         # Pipeline related
         self._input_queue = queue.Queue(maxsize=self.batch_size*2)
@@ -111,7 +114,7 @@ class DocumentProcessor(BaseContextProcessor):
         
         # Support TEXT type content (from vaults documents) - processed using LLM chunker
         if context.source == ContextSource.TEXT:
-            return self.llm_chunker is not None or context.content_format == ContentFormat.TEXT
+            return bool(context.content_text or context.content_path)
         
         if context.source == ContextSource.FILE:
             if not context.content_path or not Path(context.content_path).exists():
@@ -138,11 +141,10 @@ class DocumentProcessor(BaseContextProcessor):
         if context_data.source == ContextSource.TEXT:
             # Prioritize using LLM chunker for vaults documents
             if self.llm_chunker and context_data.content_text:
-                logger.info(f"Using LLM chunker for vaults document {context_data.object_id}")
+                logger.info(f"Using LLM chunker for text payload %s", context_data.object_id)
                 return self.llm_chunker
-            # If no LLM chunker, cannot process TEXT content
-            logger.warning(f"No suitable chunker for TEXT content {context_data.object_id}")
-            return None
+            logger.info("Using SimpleTextChunker for text payload %s", context_data.object_id)
+            return self.simple_text_chunker
 
         if context_data.source == ContextSource.FILE:
             content_path = context_data.content_path
@@ -236,17 +238,37 @@ class DocumentProcessor(BaseContextProcessor):
         """Create ProcessedContext objects from chunks."""
         processed_contexts = []
         
-        # Extract vaults document information
         additional_info = raw_context.additional_info or {}
         vault_id = additional_info.get('vault_id')
         document_title = additional_info.get('title', '')
-        
+        raw_type = additional_info.get('raw_type', 'vaults')
+        raw_id = additional_info.get('raw_id') or (str(vault_id) if vault_id else None)
+        file_path = additional_info.get('file_path', raw_context.content_path)
+        context_type_value = additional_info.get('context_type')
+
+        context_type = ContextType.SEMANTIC_CONTEXT
+        if context_type_value:
+            try:
+                context_type = ContextType(context_type_value)
+            except ValueError:
+                logger.warning(
+                    "Unknown context_type '%s' for document %s; defaulting to SEMANTIC_CONTEXT",
+                    context_type_value,
+                    raw_context.object_id,
+                )
+
+        event_time = additional_info.get('event_time') or raw_context.create_time
+        update_time = additional_info.get('update_time') or raw_context.create_time
+
         for i, chunk in enumerate(chunks):
             # 1. Create ExtractedData
+            summary_text = chunk.summary if chunk.summary else (
+                chunk.text[:200] + "..." if chunk.text and len(chunk.text) > 200 else chunk.text
+            )
             extracted_data = ExtractedData(
                 title=chunk.title if chunk.title else document_title,
-                summary=chunk.summary if chunk.summary else chunk.text[:200] + "..." if len(chunk.text) > 200 else chunk.text,
-                context_type=ContextType.SEMANTIC_CONTEXT,
+                summary=summary_text,
+                context_type=context_type,
                 confidence=10,
                 importance=5,
             )
@@ -255,14 +277,14 @@ class DocumentProcessor(BaseContextProcessor):
             # 2. Create ContextProperties (including document tracking info)
             context_properties = ContextProperties(
                 create_time=raw_context.create_time,
-                event_time=raw_context.create_time,
-                update_time=raw_context.create_time,
-                enable_merge=False,
+                event_time=event_time,
+                update_time=update_time,
+                enable_merge=raw_context.enable_merge,
                 raw_properties=[raw_context],
                 # Document tracking fields
-                file_path=None,  # vaults documents have no file path
-                raw_type='vaults',  # source type
-                raw_id=str(vault_id) if vault_id else None,  # ID from vaults table
+                file_path=file_path,
+                raw_type=raw_type,
+                raw_id=raw_id,
             )
 
             # 3. Create Vectorize
