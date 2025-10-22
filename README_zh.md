@@ -38,13 +38,15 @@ MineContext Glass 以真实世界为原点重新想象个人上下文管理。�
 - 自适应抽帧与向量嵌入，将长视频蒸馏为可检索的语义片段。
 - 统一索引层把视频洞察与原 MineContext 数据库合并，实现跨模态检索。
 - 事件与高光生成，把原始素材转化为时间线、日常摘要和回顾提示。
+- 一键 vlog 管线脚本，自动完成抽帧、语音转写与总结报告生成。
+- WhisperX 语音转写脚本，可将视频音轨转为带时间戳的文本并写入上下文。
 
 ## 路线图
 
 | 状态        | 里程碑             | 说明                                                   |
 | ----------- | ------------------ | ------------------------------------------------------ |
 | ✅ 已完成   | 视频采集与处理管线 | 支持日常视频录制、压缩与上下文抽取，已投入使用。       |
-| 🛠️ 开发中 | 语音识别           | 提取视频音频中的语音，生成时间戳文本并写入上下文图谱。 |
+| ✅ 已完成   | 语音识别           | 提供 WhisperX 转写工具，生成时间戳文本并写入上下文图谱。 |
 | 🧪 计划中   | 多模态融合生成     | 联合视觉、语音与数字信号，产出更丰富的总结与主动任务。 |
 
 ## 快速开始
@@ -87,9 +89,28 @@ uv run opencontext start --port 8000 --config config/config.yaml
 
 当智能眼镜素材同步到配置的导入路径后，管线会自动触发处理。可通过 CLI 或 API 查看时间线、摘要以及检索结果。
 
-### 日常 vlog 批处理
+### 一键 vlog 管线
 
 将当日原始 `.mp4` 视频放入 `videos/<日期>/` 目录（如 `videos/2025-02-27/12-13.mp4`），然后执行：
+
+```bash
+uv run python -m opencontext.tools.vlog --date 2025-02-27 --save-transcripts
+```
+
+该脚本会依次抽帧、写入上下文、调用 WhisperX 进行语音转写，并最终在 `persist/reports/<date>.md` 生成 Markdown 日报。
+
+常用参数：
+
+- `--frame-interval 5`：抽帧间隔秒数（默认 5）。
+- `--no-transcribe`：仅运行抽帧与总结，不触发语音转写。
+- `--save-transcripts` / `--transcript-dir`：保存带时间戳的 JSON 转写结果。
+- `--diarize --hf-token <token>`：启用说话人分离（需要 HuggingFace 访问令牌）。
+
+脚本会自动检测 GPU/CPU，可通过 `--device cuda`、`--compute-type float16` 等参数覆盖默认值。
+
+### 日常 vlog 批处理
+
+若仅需执行抽帧与截图上下文（例如调试或测试 WhisperX 之前的流程），可单独运行：
 
 ```bash
 uv run opencontext.tools.daily_vlog_ingest
@@ -97,13 +118,29 @@ uv run opencontext.tools.daily_vlog_ingest
 
 脚本会抽帧、写入上下文并在 `persist/reports/<date>.md` 生成 Markdown 总结，可通过 `--date YYYY-MM-DD`、`--frame-interval 5` 等参数指定日期或抽帧间隔。
 
+### WhisperX 语音转写
+
+如需对单个视频批量转写，或在独立环境调试 WhisperX，可直接调用：
+
+```bash
+uv run python -m opencontext.tools.whisperx_transcribe videos/2025-02-27/12-13.mp4 --save-output
+```
+
+常用参数：
+
+- `--diarize --hf-token <token>`：开启说话人分离（需要 HuggingFace 访问令牌）。
+- `--skip-ingest`：仅生成 JSON 文件，不推送到 OpenContext 管线。
+- `--output-dir`：调整转写结果的保存目录（默认 `persist/transcripts`）。
+
+转写时需要预先安装 WhisperX 及其依赖；脚本会自动检测 `ffmpeg` 和 GPU 能力，默认在 GPU 上以 `float16` 精度运行。
+
 ## 架构总览
 
 MineContext Glass 延续原有的 `context_capture → context_processing → storage → server routes` 流程，并在捕获阶段新增视频管理模块。
 
 - **视频捕获管理器(开发中)**：负责从智能眼镜拉取素材、去重并写入受管存储。
 - **视频处理管线**：执行抽帧、生成嵌入，并将结构化片段写入上下文存储。
-- **语音识别层（开发中）**：把音轨转为带时间戳的文本，附着到对应的时间线节点。
+- **语音识别层（WhisperX）**：把音轨转为带时间戳的文本，附着到对应的时间线节点。
 - **统一检索 API**：在同一入口提供赛博上下文与现实世界上下文的查询与推荐。
 
 代码入口仍位于 `opencontext/` 目录；配置文件在 `config/`；运行时数据写入 `persist/` 与 `logs/`（请勿提交到版本库）。

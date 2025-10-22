@@ -39,6 +39,7 @@ dependencies = [
     "volcengine",
     "pillow",
     "imagehash",
+    "whisperx",
 ]
 
 [project.scripts]
