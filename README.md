@@ -10,21 +10,16 @@ Built on ByteDance's [MineContext](https://github.com/volcengine/MineContext), e
 
 </div>
 
-## Table of Contents
+<p align="center">
+  <a href="README_zh.md">中文文档</a>
+</p>
 
-- [Table of Contents](#table-of-contents)
-- [Vision](#vision)
-- [Current Capabilities](#current-capabilities)
-- [Roadmap](#roadmap)
-- [Quick Start](#quick-start)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Configuration](#configuration)
-  - [Start the Pipeline](#start-the-pipeline)
-  - [Daily Vlog Ingest](#daily-vlog-ingest)
-- [Architecture](#architecture)
-- [Contributing](#contributing)
-- [License](#license)
+<p align="center">
+  <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-blue.svg">
+  <img alt="uv managed env" src="https://img.shields.io/badge/uv-managed%20env-6f42c1.svg">
+  <img alt="ffmpeg required" src="https://img.shields.io/badge/ffmpeg-required-brightgreen.svg">
+  <img alt="WhisperX optional" src="https://img.shields.io/badge/WhisperX-optional%20GPU-orange.svg">
+</p>
 
 ## Vision
 
@@ -55,6 +50,7 @@ This repository keeps MineContext's developer tooling while adding the video pro
 
 - macOS or Linux with Python 3.9+.
 - `uv` package manager (recommended) or a Python virtual environment.
+- `ffmpeg` and `ffprobe` available on `PATH` (for example `brew install ffmpeg` on macOS).
 - Optional: connected smart glasses with USB or Wi‑Fi file sync.
 
 ### Installation
@@ -87,7 +83,25 @@ uv run opencontext start --port 8000 --config config/config.yaml
 
 Glasses footage dropped into the configured import path will be processed automatically. Use the CLI or API endpoints to inspect timelines, digests, and retrieved clips.
 
-### Daily Vlog Ingest
+### End-to-End Vlog Pipeline
+
+We now recommend the consolidated `opencontext.tools.vlog` workflow, which stitches together frame extraction, WhisperX transcription, and daily report generation. It verifies `ffmpeg` availability, initializes logging, and waits for processors to drain before moving on to the next stage.
+
+```bash
+uv run python -m opencontext.tools.vlog --date 2025-02-27 --frame-interval 5
+```
+
+Key options:
+
+- `--no-transcribe` to skip WhisperX while keeping frame ingestion.
+- `--whisper-model`, `--device`, `--compute-type`, and `--batch-size` to tune transcription performance.
+- `--save-transcripts` and `--transcript-dir persist/transcripts` to persist JSON outputs locally.
+- `--diarize --hf-token <token>` to enable speaker diarization once you configure a HuggingFace token.
+- `--skip-extract` or `--no-clean` to reuse existing frames inside `persist/vlog_frames/<DATE>/`.
+
+Successful runs drop reports under `persist/reports/<date>.md`, with optional transcript artifacts stored alongside.
+
+### Frame-Only Ingest (Legacy)
 
 For scheduled processing of a day's recordings, place raw `.mp4` files under `videos/<DATE>/` (for example `videos/2025-02-27/12-13.mp4`) and run:
 

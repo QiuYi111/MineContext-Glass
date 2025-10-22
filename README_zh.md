@@ -21,7 +21,9 @@
   - [安装](#安装)
   - [配置](#配置)
   - [启动管线](#启动管线)
-  - [日常 vlog 批处理](#日常-vlog-批处理)
+  - [全量 vlog 管线](#全量-vlog-管线)
+  - [仅抽帧批处理（旧版）](#仅抽帧批处理旧版)
+  - [WhisperX 语音转写](#whisperx-语音转写)
 - [架构总览](#架构总览)
 - [参与贡献](#参与贡献)
 - [许可证](#许可证)
@@ -38,7 +40,7 @@ MineContext Glass 以真实世界为原点重新想象个人上下文管理。�
 - 自适应抽帧与向量嵌入，将长视频蒸馏为可检索的语义片段。
 - 统一索引层把视频洞察与原 MineContext 数据库合并，实现跨模态检索。
 - 事件与高光生成，把原始素材转化为时间线、日常摘要和回顾提示。
-- 一键 vlog 管线脚本，自动完成抽帧、语音转写与总结报告生成。
+- `opencontext.tools.vlog` 全量脚本，将抽帧、WhisperX 转写、日报生成整合为一条命令。
 - WhisperX 语音转写脚本，可将视频音轨转为带时间戳的文本并写入上下文。
 
 ## 路线图
@@ -57,6 +59,7 @@ MineContext Glass 以真实世界为原点重新想象个人上下文管理。�
 
 - macOS 或 Linux，Python 3.9+。
 - 建议使用 `uv` 包管理器，或手动创建虚拟环境。
+- `ffmpeg` 与 `ffprobe` 已安装并在 `PATH` 中（例如 macOS 上执行 `brew install ffmpeg`）。
 - 可选：能够通过 USB 或 Wi‑Fi 同步文件的智能眼镜设备。
 
 ### 安装
@@ -89,28 +92,27 @@ uv run opencontext start --port 8000 --config config/config.yaml
 
 当智能眼镜素材同步到配置的导入路径后，管线会自动触发处理。可通过 CLI 或 API 查看时间线、摘要以及检索结果。
 
-### 一键 vlog 管线
+### 全量 vlog 管线
 
-将当日原始 `.mp4` 视频放入 `videos/<日期>/` 目录（如 `videos/2025-02-27/12-13.mp4`），然后执行：
+推荐使用整合后的 `opencontext.tools.vlog` 脚本完成抽帧、WhisperX 转写与日报生成。脚本会自动检测 `ffmpeg`、初始化日志，并在每个阶段等待处理器队列清空后继续下一步。
 
 ```bash
-uv run python -m opencontext.tools.vlog --date 2025-02-27 --save-transcripts
+uv run python -m opencontext.tools.vlog --date 2025-02-27 --frame-interval 5
 ```
-
-该脚本会依次抽帧、写入上下文、调用 WhisperX 进行语音转写，并最终在 `persist/reports/<date>.md` 生成 Markdown 日报。
 
 常用参数：
 
-- `--frame-interval 5`：抽帧间隔秒数（默认 5）。
-- `--no-transcribe`：仅运行抽帧与总结，不触发语音转写。
-- `--save-transcripts` / `--transcript-dir`：保存带时间戳的 JSON 转写结果。
-- `--diarize --hf-token <token>`：启用说话人分离（需要 HuggingFace 访问令牌）。
+- `--no-transcribe`：跳过 WhisperX 转写，仅保留抽帧与摘要。
+- `--whisper-model`、`--device`、`--compute-type`、`--batch-size`：调优 WhisperX 性能。
+- `--save-transcripts` 与 `--transcript-dir persist/transcripts`：保存 JSON 转写文件。
+- `--diarize --hf-token <token>`：启用说话人分离（需配置 HuggingFace 令牌）。
+- `--skip-extract` 或 `--no-clean`：重复使用 `persist/vlog_frames/<日期>/` 目录下已有图片。
 
-脚本会自动检测 GPU/CPU，可通过 `--device cuda`、`--compute-type float16` 等参数覆盖默认值。
+成功运行后会在 `persist/reports/<date>.md` 写入日报，如启用保存转写则会在 `persist/transcripts/` 生成对应 JSON。
 
-### 日常 vlog 批处理
+### 仅抽帧批处理（旧版）
 
-若仅需执行抽帧与截图上下文（例如调试或测试 WhisperX 之前的流程），可单独运行：
+若仅需执行抽帧并写入截图上下文（例如调试或在 WhisperX 部署前测试流程），可运行保留的旧脚本：
 
 ```bash
 uv run opencontext.tools.daily_vlog_ingest
