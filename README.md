@@ -39,11 +39,11 @@ By standing on MineContext's mature context engineering foundations, we combine 
 
 ## Roadmap
 
-| Status | Milestone | Description |
-| ------ | --------- | ----------- |
-| ✅ Completed | Video capture pipeline | Daily video recording, compression, and context extraction are production-ready. |
-| 🛠️ In Progress | Speech recognition | Transcribe on-device audio to bring voice context into the knowledge graph. |
-| 🧪 Planned | Multimodal synthesis | Fuse visual, audio, and digital signals into richer summaries and proactive tasks. |
+| Status           | Milestone              | Description                                                                        |
+| ---------------- | ---------------------- | ---------------------------------------------------------------------------------- |
+| ✅ Completed     | Video capture pipeline | Daily video recording, compression, and context extraction are production-ready.   |
+| 🛠️ In Progress | Speech recognition     | Transcribe on-device audio to bring voice context into the knowledge graph.        |
+| 🧪 Planned       | Multimodal synthesis   | Fuse visual, audio, and digital signals into richer summaries and proactive tasks. |
 
 ## Quick Start
 
@@ -99,7 +99,7 @@ The tool extracts frames, updates the context store, and writes summaries to `pe
 
 MineContext Glass keeps the original context-flow of `context_capture → context_processing → storage → server routes`, expanding the capture stage with a dedicated video manager.
 
-- **Video Capture Manager** pulls footage from smart glasses, handles deduplication, and writes raw assets to managed storage.
+- **Video Capture Manager** (upcoming) pulls footage from smart glasses, handles deduplication, and writes raw assets to managed storage.
 - **Video Processing Pipeline** extracts frames, runs embeddings, and forwards structured snippets into the context store.
 - **Speech Recognition Layer** (upcoming) will transcribe audio tracks and attach text spans to the same timeline entries as their visual counterparts.
 - **Unified Retrieval API** exposes both cyberspace and real-life context through a single search and recommendation surface.
