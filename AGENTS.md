@@ -1,40 +1,36 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `opencontext/`: Core package (CLI, server routes, managers, context_capture, storage, llm, utils, tools).
-- `config/`: YAML config and prompt templates (e.g., `config.yaml`, `prompts_*.yaml`).
-- `src/`: Assets and docs (diagrams, GIFs); `screenshots/`: app UI examples.
-- `build.sh` + `opencontext.spec`: Packaging with PyInstaller; outputs to `dist/`.
-- `persist/`, `logs/`: Local data and logs; not for commits.
+- `opencontext/` contains the core package (CLI entry point, server routes, managers, storage, and utilities).
+- `config/` stores YAML configs and prompt templates consumed by the CLI (`config/config.yaml`, `prompts_*.yaml`).
+- `src/` holds visual assets and docs; `screenshots/` provides UI examples. PyInstaller outputs land in `dist/` after builds.
+- Local runtime data is written to `persist/` and `logs/`; keep them out of commits. Add new tests under `tests/` mirroring package paths.
 
 ## Build, Test, and Development Commands
-- Install deps (recommended): `uv sync`
-- Run server: `uv run opencontext start --port 8000` or `--config config/config.yaml`
-- Virtualenv alternative: `python -m venv .venv && source .venv/bin/activate && pip install -e . && opencontext start`
-- Package app: `./build.sh` (produces `dist/main`; copies `config/`)
+- `uv sync` installs dependencies into the managed environment.
+- `uv run opencontext start --port 8000` runs the server; add `--config config/config.yaml` to override settings.
+- `python -m venv .venv && source .venv/bin/activate && pip install -e .` sets up a virtualenv alternative.
+- `./build.sh` creates the PyInstaller bundle in `dist/` and copies required configs.
 
 ## Coding Style & Naming Conventions
-- Python ≥3.9; follow PEP 8; 4-space indent; max line length ~100.
-- Naming: modules/functions `snake_case`, classes `CamelCase`, constants `UPPER_SNAKE_CASE`.
-- Use type hints, explicit imports, and small, focused modules.
+- Target Python ≥3.9 with PEP 8 spacing (4 spaces) and ~100-character lines.
+- Use explicit imports, type hints, and focused modules. Name modules/functions in `snake_case`, classes in `CamelCase`, constants in `UPPER_SNAKE_CASE`.
+- Prefer succinct comments for non-obvious logic and keep files ASCII unless project context requires otherwise.
 
 ## Testing Guidelines
-- No repo-wide test suite yet. When adding tests, use `pytest`.
-- Layout: mirror package paths, e.g., `tests/context_capture/test_screenshot.py`.
-- Conventions: files `test_*.py`, functions `test_*`; run with `pytest -q`.
-- Target >80% coverage for new/changed code paths.
+- Use `pytest -q` for the test suite. Place files as `tests/<module_path>/test_*.py` with functions named `test_*`.
+- Strive for ≥80% coverage on new or modified code paths. Add fixtures or mocks alongside the relevant test modules.
 
 ## Commit & Pull Request Guidelines
-- Commit messages: conventional prefixes (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `hotfix:`). Use imperative mood; keep subject ≤72 chars.
-- Branch names: `feature/<name>`, `fix/<name>`, `docs/<name>`, etc.
-- PRs: link issues, describe rationale and impact, list config changes/migrations, add screenshots for UI/behavioral updates. Keep scope focused.
+- Commit messages follow Conventional Commits (e.g., `feat: add context manager`), imperative mood, ≤72 characters.
+- PRs should link issues, describe rationale and impact, call out config or migration changes, and include screenshots for UI-impacting work.
+- Keep scope tight; document manual testing or coverage notes in the PR body.
 
 ## Security & Configuration Tips
-- Do not commit secrets. Store API keys in local `config/config.yaml` only.
-- Common options: `--host`, `--port`, `--config`. CLI args override config.
-- `persist/` and `logs/` contain local artifacts; review before sharing.
+- Never commit secrets; store API keys locally in `config/config.yaml`.
+- Common CLI flags: `--host`, `--port`, `--config`. CLI arguments take precedence over config files.
+- Review `persist/` and `logs/` before sharing artifacts; redact sensitive context capture data.
 
 ## Architecture Overview
-- Pipeline: context_capture → context_processing → storage → server/routes → context_consumption.
-- Entry point: `opencontext` CLI (`opencontext.cli:main`). See `README.md` for details.
-
+- Core pipeline: `context_capture` → `context_processing` → storage → server routes → downstream consumers.
+- Entry point is the `opencontext` CLI (`opencontext.cli:main`). Consult `README.md` for usage patterns and integration examples.
