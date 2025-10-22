@@ -8,12 +8,9 @@
 Batch ingest a day's vlog videos by sampling frames and feeding them into the
 existing screenshot processing pipeline, then emit the daily summary report.
 
-Usage (after copying mp4 files into a folder):
+Usage (after copying the day's mp4 files into videos/DD-MM/):
 
-    uv run python -m opencontext.tools.daily_vlog_ingest \
-        --video-dir data/vlogs/2025-02-26 \
-        --date 2025-02-26 \
-        --start-time 2025-02-26T08:00:00+08:00
+    uv run python -m opencontext.tools.daily_vlog_ingest
 """
 
 import argparse
@@ -21,13 +18,14 @@ import asyncio
 import datetime as dt
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from opencontext.config.global_config import GlobalConfig
 from opencontext.context_consumption.generation.generation_report import ReportGenerator
@@ -53,19 +51,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         description="Extract frames from vlog videos, ingest them, and generate the daily report."
     )
     parser.add_argument(
-        "--video-dir",
-        required=True,
-        help="Directory that contains the mp4 files for the day.",
-    )
-    parser.add_argument(
         "--date",
-        required=True,
-        help="Activity date (YYYY-MM-DD) used for organising outputs and report window.",
+        help="Activity date. Accepts YYYY-MM-DD or DD-MM. Defaults to today.",
     )
     parser.add_argument(
-        "--start-time",
-        help="Optional ISO timestamp (local or with timezone) for the first frame. "
-             "Defaults to the start of the provided date in the local timezone.",
+        "--year",
+        type=int,
+        help="Override year if using DD-MM folder naming (defaults to current year).",
     )
     parser.add_argument(
         "--frame-interval",
@@ -135,25 +127,52 @@ def prepare_output_root(base_dir: Path, date_str: str, clean: bool) -> Path:
     return day_dir
 
 
-def parse_date(date_str: str) -> dt.date:
+def parse_day_folder(date_token: str, year_override: Optional[int]) -> dt.date:
+    """Parse a date token that may be 'YYYY-MM-DD' or 'DD-MM'/'MM-DD'."""
+    now = dt.datetime.now().astimezone()
+    if not date_token:
+        return now.date()
+
     try:
-        return dt.date.fromisoformat(date_str)
-    except ValueError as exc:
-        raise ValueError(f"Invalid date '{date_str}'; expected YYYY-MM-DD") from exc
+        return dt.date.fromisoformat(date_token)
+    except ValueError:
+        pass
+
+    parts = [p for p in re.split(r'[-_/]', date_token) if p]
+    if len(parts) != 2:
+        raise ValueError(f"Unsupported date format '{date_token}'. Use YYYY-MM-DD or DD-MM.")
+
+    first, second = map(int, parts)
+    # Try to infer ordering (prefer DD-MM as user example suggests)
+    day, month = first, second
+    if day > 31 or month > 12:
+        # swap if likely MM-DD
+        day, month = month, day
+    elif day <= 12 and month <= 12:
+        # ambiguous, prefer DD-MM but allow override by year flag
+        pass
+
+    year = year_override or now.year
+    return dt.date(year, month, day)
 
 
-def parse_start_datetime(date_val: dt.date, start_time: Optional[str]) -> dt.datetime:
-    if start_time:
-        try:
-            parsed = dt.datetime.fromisoformat(start_time)
-        except ValueError as exc:
-            raise ValueError(f"Invalid --start-time '{start_time}': {exc}") from exc
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=dt.datetime.now().astimezone().tzinfo)
-        return parsed
-
-    local_tz = dt.datetime.now().astimezone().tzinfo
-    return dt.datetime.combine(date_val, dt.time.min).replace(tzinfo=local_tz)
+def build_folder_candidates(date_val: dt.date, original_token: Optional[str]) -> List[str]:
+    """Return possible folder names to search for the videos."""
+    candidates = []
+    if original_token:
+        candidates.append(original_token)
+    candidates.extend([
+        f"{date_val.day:02d}-{date_val.month:02d}",
+        date_val.isoformat(),
+    ])
+    # Deduplicate while preserving order
+    seen = set()
+    ordered = []
+    for item in candidates:
+        if item not in seen:
+            ordered.append(item)
+            seen.add(item)
+    return ordered
 
 
 def run_ffmpeg_extract(video_path: Path, output_dir: Path, interval: int) -> None:
@@ -177,117 +196,92 @@ def run_ffmpeg_extract(video_path: Path, output_dir: Path, interval: int) -> Non
     subprocess.run(cmd, check=True)
 
 
-def probe_duration(video_path: Path) -> Optional[float]:
-    """Return the video duration in seconds using ffprobe."""
-    cmd = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=nokey=1:noprint_wrappers=1",
-        str(video_path),
-    ]
-    try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        return float(result.stdout.strip())
-    except (subprocess.CalledProcessError, ValueError):
-        LOG.warning("Unable to determine duration for %s; falling back to frame count.", video_path)
+def parse_video_start_time(stem: str, day_start: dt.datetime) -> Optional[dt.datetime]:
+    """Parse video filename (e.g., '12-13.mp4' or '09_30-10_00') to derive start timestamp."""
+    # First try compact forms: 1230, 12h30, 12:30, 12_30
+    compact_match = re.match(r'(?P<hour>\d{1,2})(?:[:h_]?)(?P<minute>\d{2})?', stem)
+    if compact_match:
+        hour = int(compact_match.group("hour"))
+        minute = compact_match.group("minute")
+        minute_val = int(minute) if minute else 0
+        if 0 <= hour < 24 and 0 <= minute_val < 60:
+            return day_start.replace(hour=hour, minute=minute_val)
+
+    # Fallback for range-like patterns: 12-13, 08-09-30, etc.
+    tokens = [t for t in re.split(r'[^0-9]', stem) if t]
+    if not tokens:
         return None
 
+    first = tokens[0]
+    if len(first) in (1, 2):
+        hour = int(first)
+        if hour < 24:
+            return day_start.replace(hour=hour, minute=0)
+    elif len(first) == 4:
+        hour = int(first[:2])
+        minute = int(first[2:])
+        if hour < 24 and minute < 60:
+            return day_start.replace(hour=hour, minute=minute)
 
-def extract_frames_for_day(
+    return None
+
+
+def collect_frames(
     videos: List[Path],
     day_output_dir: Path,
     interval: int,
-    clean_each_video: bool,
+    video_start_times: Dict[Path, dt.datetime],
+    reuse_existing: bool,
+    day_start: dt.datetime,
+    clean_existing: bool,
 ) -> List[FrameRecord]:
-    """Extract frames for every video and collect metadata for ingestion."""
+    """Extract (or reuse) frames for every video and collect metadata for ingestion."""
     records: List[FrameRecord] = []
-    baseline = dt.datetime.now().astimezone()
-    elapsed = 0.0
 
     for video_path in videos:
-        video_output_dir = day_output_dir / video_path.stem
-        if clean_each_video and video_output_dir.exists():
-            shutil.rmtree(video_output_dir)
+        start_dt = video_start_times.get(video_path)
+        if start_dt is None:
+            LOG.warning(
+                "Unable to parse start time from filename '%s'; fallback to sequential ordering.",
+                video_path.name,
+            )
+            start_dt = day_start + dt.timedelta(seconds=len(records) * interval)
 
-        LOG.info("Sampling frames from %s", video_path)
-        run_ffmpeg_extract(video_path, video_output_dir, interval)
+        video_output_dir = day_output_dir / video_path.stem
+
+        if not reuse_existing:
+            if clean_existing and video_output_dir.exists():
+                shutil.rmtree(video_output_dir)
+
+            LOG.info("Sampling frames from %s", video_path)
+            run_ffmpeg_extract(video_path, video_output_dir, interval)
+        else:
+            if not video_output_dir.exists():
+                LOG.warning("Frame directory %s is missing; switching to extraction.", video_output_dir)
+                LOG.info("Sampling frames from %s", video_path)
+                run_ffmpeg_extract(video_path, video_output_dir, interval)
 
         frames = sorted(video_output_dir.glob("frame_*.jpg"))
         if not frames:
-            LOG.warning("No frames extracted from %s; skipping.", video_path)
+            LOG.warning("No frames available for %s; skipping.", video_path)
             continue
 
-        duration = probe_duration(video_path)
         for idx, frame_path in enumerate(frames):
-            relative_seconds = elapsed + idx * interval
+            frame_timestamp = start_dt + dt.timedelta(seconds=idx * interval)
+            relative_seconds = max(0.0, (frame_timestamp - day_start).total_seconds())
             records.append(
                 FrameRecord(
                     path=frame_path,
-                    timestamp=baseline + dt.timedelta(seconds=relative_seconds),
+                    timestamp=frame_timestamp,
                     video_name=video_path.stem,
                     frame_index=idx,
                     relative_seconds=relative_seconds,
                 )
             )
 
-        if duration:
-            elapsed += duration
-        else:
-            elapsed += len(frames) * interval
-
+    # Sort records by timestamp to ensure chronological ingestion
+    records.sort(key=lambda record: record.timestamp)
     return records
-
-
-def reuse_existing_frames(
-    videos: List[Path],
-    day_output_dir: Path,
-    interval: int,
-) -> List[FrameRecord]:
-    """Collect metadata for already extracted frames without running ffmpeg."""
-    records: List[FrameRecord] = []
-    elapsed = 0.0
-    baseline = dt.datetime.now().astimezone()
-
-    for video_path in videos:
-        video_output_dir = day_output_dir / video_path.stem
-        frames = sorted(video_output_dir.glob("frame_*.jpg"))
-        if not frames:
-            LOG.warning("No frames found under %s; skipping.", video_output_dir)
-            continue
-
-        duration = probe_duration(video_path)
-        for idx, frame_path in enumerate(frames):
-            relative_seconds = elapsed + idx * interval
-            records.append(
-                FrameRecord(
-                    path=frame_path,
-                    timestamp=baseline + dt.timedelta(seconds=relative_seconds),
-                    video_name=video_path.stem,
-                    frame_index=idx,
-                    relative_seconds=relative_seconds,
-                )
-            )
-
-        if duration:
-            elapsed += duration
-        else:
-            elapsed += len(frames) * interval
-
-    return records
-
-
-def remap_timestamps(records: List[FrameRecord], start_dt: dt.datetime) -> None:
-    """Shift sampled frames so that the first frame aligns to start_dt."""
-    if not records:
-        return
-    base_ts = records[0].relative_seconds
-    for rec in records:
-        offset = rec.relative_seconds - base_ts
-        rec.timestamp = start_dt + dt.timedelta(seconds=offset)
 
 
 def ingest_frames(context_lab: OpenContext, records: List[FrameRecord]) -> None:
@@ -368,40 +362,78 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ensure_ffmpeg_available()
 
-    video_dir = Path(args.video_dir).expanduser().resolve()
-    if not video_dir.exists():
-        LOG.error("Video directory %s does not exist.", video_dir)
+    project_root = resolve_project_root()
+    os.environ.setdefault("CONTEXT_PATH", str(project_root))
+
+    local_tz = dt.datetime.now().astimezone().tzinfo
+    date_token = args.date
+    try:
+        date_val = parse_day_folder(date_token or "", args.year)
+    except ValueError as exc:
+        LOG.error(str(exc))
         return 1
+
+    folder_candidates = build_folder_candidates(date_val, date_token)
+    video_root = project_root / "videos"
+    video_dir = None
+    for candidate in folder_candidates:
+        candidate_path = video_root / candidate
+        if candidate_path.exists():
+            video_dir = candidate_path
+            break
+
+    if video_dir is None:
+        LOG.error(
+            "Could not find videos for %s. Tried: %s",
+            date_val.isoformat(),
+            ", ".join(str(video_root / c) for c in folder_candidates),
+        )
+        return 1
+
+    LOG.info("Using video directory: %s", video_dir)
 
     videos = sorted(video_dir.glob("*.mp4"))
     if not videos:
         LOG.error("No mp4 files found under %s", video_dir)
         return 1
 
-    date_val = parse_date(args.date)
-    start_dt = parse_start_datetime(date_val, args.start_time)
-
-    project_root = resolve_project_root()
-    os.environ.setdefault("CONTEXT_PATH", str(project_root))
+    if args.skip_extract:
+        LOG.info("Reusing existing frames under %s", args.output_dir)
 
     frame_root = Path(args.output_dir).expanduser().resolve()
-    day_output_dir = prepare_output_root(frame_root, args.date, clean=not args.no_clean and not args.skip_extract)
+    day_folder_name = video_dir.name
+    day_output_dir = prepare_output_root(
+        frame_root,
+        day_folder_name,
+        clean=(not args.no_clean and not args.skip_extract),
+    )
 
-    if args.skip_extract:
-        records = reuse_existing_frames(videos, day_output_dir, args.frame_interval)
-    else:
-        records = extract_frames_for_day(
-            videos,
-            day_output_dir,
-            args.frame_interval,
-            clean_each_video=True,
-        )
+    day_start = dt.datetime.combine(date_val, dt.time.min)
+    if local_tz:
+        day_start = day_start.replace(tzinfo=local_tz)
+
+    video_start_times: Dict[Path, dt.datetime] = {}
+    for video_path in videos:
+        start_dt = parse_video_start_time(video_path.stem, day_start)
+        if start_dt:
+            video_start_times[video_path] = start_dt
+
+    if not video_start_times:
+        LOG.warning("Failed to infer start times from filenames; frames will be ordered sequentially.")
+
+    records = collect_frames(
+        videos=videos,
+        day_output_dir=day_output_dir,
+        interval=args.frame_interval,
+        video_start_times=video_start_times,
+        reuse_existing=args.skip_extract,
+        day_start=day_start,
+        clean_existing=not args.no_clean,
+    )
 
     if not records:
         LOG.error("No frames available for ingestion. Aborting.")
         return 1
-
-    remap_timestamps(records, start_dt)
 
     global_config = GlobalConfig()
     global_config.initialize(args.config)
@@ -411,14 +443,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ingest_frames(context_lab, records)
     wait_for_processing(context_lab, max_wait=args.max_wait)
 
-    day_start = dt.datetime.combine(date_val, dt.time.min)
-    if start_dt.tzinfo:
-        day_start = day_start.replace(tzinfo=start_dt.tzinfo)
     day_end = day_start + dt.timedelta(days=1)
 
-    LOG.info("Generating daily report for %s", args.date)
+    report_date_str = date_val.isoformat()
+    LOG.info("Generating daily report for %s", report_date_str)
     report = asyncio.run(generate_daily_report(int(day_start.timestamp()), int(day_end.timestamp())))
-    output_path = write_report(report, Path(args.report_dir).expanduser().resolve(), args.date)
+    output_path = write_report(report, Path(args.report_dir).expanduser().resolve(), report_date_str)
     LOG.info("Daily report saved to %s", output_path)
 
     context_lab.shutdown(graceful=True)

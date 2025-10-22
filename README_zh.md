@@ -339,21 +339,17 @@ opencontext start --port 8000
 如果你习惯每天录制 vlog 视频，并希望一次性抽取关键帧交给 MineContext 生成总结，可以使用新的批处理脚本（需要本地安装 `ffmpeg` 与 `ffprobe` 命令）：
 
 ```bash
-# 拷贝当日 mp4 至某个目录，例如 data/vlogs/2025-02-26/
-uv run python -m opencontext.tools.daily_vlog_ingest \
-  --video-dir data/vlogs/2025-02-26 \
-  --date 2025-02-26 \
-  --start-time 2025-02-26T08:00:00+08:00 \
-  --frame-interval 5
+# 将当日 vlog 放到 MineContext/videos/27-02/ 之类的目录后直接运行
+uv run python -m opencontext.tools.daily_vlog_ingest
 ```
 
-- `--video-dir`：存放当日 mp4 的文件夹。
-- `--date`：日志日期，脚本会把抽帧结果放在 `persist/vlog_frames/<date>/`。
-- `--start-time`：首个视频开拍时间（ISO 格式，可带时区），便于按时间线生成活动。
-- `--frame-interval`：抽帧间隔，默认每 5 秒取一帧。
-- 使用 `--skip-extract` 可复用已有帧，`--no-clean` 可保留旧图避免被清理。
+- 默认按“今天”的日期查找 `videos/DD-MM/`（或 `videos/YYYY-MM-DD/`）目录，并抽取其中的所有 `.mp4`。
+- 第一次使用记得在仓库根目录创建 `videos/` 文件夹，并按日期创建子目录，例如 `videos/27-02/`。
+- 视频文件建议命名为时间段，例如 `12-13.mp4`、`08-30_09-00.mp4`，脚本会据此推算每段的起止时间。
+- 若需处理历史日期，可使用 `--date 2025-02-27`（支持 `DD-MM` 或 `YYYY-MM-DD`），年份缺失时默认取当前年，可用 `--year` 覆盖。
+- 常用可选项：`--frame-interval`（抽帧间隔，默认 5 秒）、`--skip-extract`（复用已有帧）、`--no-clean`（保留旧帧不清空）。
 
-处理完成后脚本会自动调用内置生成链路，在 `persist/reports/<date>.md` 写入 Markdown 版当日总结，同时结果也会被落入本地数据库，便于在 UI 中查看。
+处理完成后脚本会自动调用内置生成链路，在 `persist/vlog_frames/<日期目录>/` 落下抽帧图，在 `persist/reports/<yyyy-mm-dd>.md` 写入 Markdown 版当日总结，同时结果也会被写入本地数据库，可在 UI 中继续浏览。
 
 ## 👥 社区
 
