@@ -113,6 +113,11 @@ def ensure_ffmpeg_available() -> None:
         )
 
 
+def ensure_ffmpeg() -> None:
+    """Backward-compatible wrapper used by other tools."""
+    ensure_ffmpeg_available()
+
+
 def resolve_project_root() -> Path:
     """Project root is two levels up from this file."""
     return Path(__file__).resolve().parents[2]
