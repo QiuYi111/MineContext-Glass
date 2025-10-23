@@ -56,7 +56,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [dependency-groups]
-dev = []
+dev = [
+    "pytest>=8.4.2",
+]
 
 [tool.hatch.build.targets.wheel]
-packages = ["opencontext"]
+packages = ["opencontext", "glass"]
