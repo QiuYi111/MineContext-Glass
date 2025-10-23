@@ -76,6 +76,11 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         help="Skip frame extraction and reuse existing images under output-dir/date.",
     )
     parser.add_argument(
+        "--skip-ingest",
+        action="store_true",
+        help="Skip frame ingestion and reuse contexts already stored in the database.",
+    )
+    parser.add_argument(
         "--no-clean",
         action="store_true",
         help="Do not delete the existing frame directory for the day before extraction.",
@@ -99,6 +104,11 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
         "--whisper-model",
         default="large-v2",
         help="WhisperX ASR model name (default: large-v2).",
+    )
+    parser.add_argument(
+        "--cpu-only",
+        action="store_true",
+        help="Force WhisperX to run on CPU and use int8 compute type when unspecified.",
     )
     parser.add_argument(
         "--device",
@@ -275,42 +285,28 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         if start_dt:
             video_start_times[video_path] = start_dt
 
-    if not video_start_times:
-        logger.warning("Failed to infer start times from filenames; frames will be ordered sequentially.")
-    logger.info(f"Starting frame extraction for {date_val.isoformat()}")
-    records = vlog_ingest.collect_frames(
-        videos=videos,
-        day_output_dir=day_output_dir,
-        interval=args.frame_interval,
-        video_start_times=video_start_times,
-        reuse_existing=args.skip_extract,
-        day_start=day_start,
-        clean_existing=not args.no_clean,
-    )
-
-    if not records:
-        logger.error("No frames available for ingestion. Aborting.")
-        return 1
-
     GlobalConfig().initialize(args.config)
     context_lab = OpenContext()
     context_lab.initialize()
 
-    compute_type = args.compute_type or whisper_tool.default_compute_type(args.device)
+    if not video_start_times:
+        logger.warning("Failed to infer start times from filenames; frames will be ordered sequentially.")
+
+    device = "cpu" if args.cpu_only else args.device
+    if args.cpu_only and args.device != "cpu":
+        logger.info("Overriding device to CPU due to --cpu-only flag.")
+    compute_type = args.compute_type or whisper_tool.default_compute_type(device)
     transcript_outputs: List[Path] = []
     exit_code = 0
 
     try:
-        vlog_ingest.ingest_frames(context_lab, records)
-        wait_for_processor(context_lab, "screenshot_processor", args.max_wait)
-
         if args.transcribe:
             for media_path in videos:
                 try:
                     payload = whisper_tool.transcribe_media(
                         media_path=media_path,
                         model_name=args.whisper_model,
-                        device=args.device,
+                        device=device,
                         compute_type=compute_type,
                         batch_size=args.batch_size,
                         align=args.align,
@@ -335,6 +331,29 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
                     whisper_tool.ingest_transcript(context_lab, media_path, payload)
 
             wait_for_processor(context_lab, "document_processor", args.max_wait)
+        else:
+            logger.info("Skipping transcription step.")
+
+        if args.skip_ingest:
+            logger.info("Skipping frame ingestion; assuming frames already ingested.")
+        else:
+            logger.info(f"Starting frame extraction for {date_val.isoformat()}")
+            records = vlog_ingest.collect_frames(
+                videos=videos,
+                day_output_dir=day_output_dir,
+                interval=args.frame_interval,
+                video_start_times=video_start_times,
+                reuse_existing=args.skip_extract,
+                day_start=day_start,
+                clean_existing=not args.no_clean,
+            )
+
+            if not records:
+                logger.error("No frames available for ingestion. Aborting.")
+                return 1
+
+            vlog_ingest.ingest_frames(context_lab, records)
+            wait_for_processor(context_lab, "screenshot_processor", args.max_wait)
 
         day_end = day_start + dt.timedelta(days=1)
         report_date_str = date_val.isoformat()
