@@ -12,9 +12,24 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from opencontext.utils.logging_utils import get_logger
+from glass.ui import router as glass_ui_router
 
 # Import route modules
-from .routes import health, web, context, content_generation, screenshots, debug, monitoring, vaults, agent_chat, completions, events, settings
+from .routes import (
+    agent_chat,
+    completions,
+    content_generation,
+    context,
+    debug,
+    events,
+    glass,
+    health,
+    monitoring,
+    screenshots,
+    settings,
+    vaults,
+    web,
+)
 
 logger = get_logger(__name__)
 
@@ -36,3 +51,5 @@ router.include_router(agent_chat.router)
 router.include_router(completions.router)
 router.include_router(events.router)
 router.include_router(settings.router)
+router.include_router(glass.router)
+router.include_router(glass_ui_router)

@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+  <div class="row">
+    <div class="col-lg-8 col-xl-6">
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-body text-center">
+          <h2 class="h4 mb-3">Upload Glass Timeline</h2>
+          <p class="text-muted small">拖拽或选择视频文件，MineContext 将自动完成抽帧、转写与上下文入库。</p>
+          <div id="glass-dropzone" class="glass-dropzone border border-2 border-dashed rounded-3 py-5 mb-3">
+            <i class="bi bi-cloud-upload fs-1 text-secondary"></i>
+            <p class="mb-1 fw-semibold">拖拽视频到此处</p>
+            <p class="text-muted small mb-0">支持 .mp4、.mov 等标准格式</p>
+          </div>
+          <input id="glass-file-input" type="file" accept="video/*" class="d-none">
+          <button id="glass-file-button" class="btn btn-primary">选择视频文件</button>
+          <div id="glass-feedback" class="mt-3 text-start small"></div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 col-xl-6">
+      <div class="card shadow-sm border-0 mb-4">
+        <div class="card-header bg-white">
+          <h3 class="h6 mb-0">Timeline 状态</h3>
+        </div>
+        <ul id="glass-timeline-list" class="list-group list-group-flush small">
+          <li class="list-group-item text-muted">尚无上传任务</li>
+        </ul>
+      </div>
+      <div class="card shadow-sm border-0">
+        <div class="card-header bg-white">
+          <h3 class="h6 mb-0">最新上下文预览</h3>
+        </div>
+        <div id="glass-context-preview" class="card-body small text-muted">
+          上传视频后将在此展示对齐后的多模态上下文摘要。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const dropzone = document.getElementById('glass-dropzone');
+  const fileInput = document.getElementById('glass-file-input');
+  const fileButton = document.getElementById('glass-file-button');
+  const feedback = document.getElementById('glass-feedback');
+  const timelineList = document.getElementById('glass-timeline-list');
+  const contextPreview = document.getElementById('glass-context-preview');
+
+  const pollingHandles = new Map();
+  const timelineState = new Map();
+
+  const STATUS_LABELS = {
+    pending: '等待处理',
+    processing: '处理中',
+    completed: '完成',
+    failed: '失败'
+  };
+
+  function setFeedback(message, type = 'info') {
+    feedback.className = \`mt-3 text-start small text-\${type}\`;
+    feedback.textContent = message;
+  }
+
+  function renderTimelineList() {
+    if (timelineState.size === 0) {
+      timelineList.innerHTML = '<li class="list-group-item text-muted">尚无上传任务</li>';
+      return;
+    }
+    let html = '';
+    timelineState.forEach((entry, timelineId) => {
+      const status = STATUS_LABELS[entry.status] || entry.status;
+      const badgeClass = entry.status === 'completed'
+        ? 'bg-success'
+        : entry.status === 'failed'
+          ? 'bg-danger'
+          : 'bg-warning text-dark';
+      html += \`
+        <li class="list-group-item d-flex justify-content-between align-items-start">
+          <div class="me-auto">
+            <div class="fw-semibold">\${entry.filename}</div>
+            <div class="text-muted">Timeline: \${timelineId}</div>
+          </div>
+          <span class="badge \${badgeClass} rounded-pill">\${status}</span>
+        </li>\`;
+    });
+    timelineList.innerHTML = html;
+  }
+
+  function renderContext(envelope) {
+    if (!envelope || !envelope.items || envelope.items.length === 0) {
+      contextPreview.className = 'card-body small text-muted';
+      contextPreview.textContent = '尚未生成上下文，请等待处理完成。';
+      return;
+    }
+    const items = envelope.items.slice(0, 5).map((item) => {
+      const modality = item.modality || 'unknown';
+      const summary = item.context?.extracted_data?.summary || '(无摘要)';
+      const start = item.context?.metadata?.segment_start;
+      const end = item.context?.metadata?.segment_end;
+      const timelineInfo = (start !== undefined && end !== undefined)
+        ? \`<div class="text-muted">时间轴: \${start.toFixed ? start.toFixed(2) : start} - \${end.toFixed ? end.toFixed(2) : end} 秒</div>\`
+        : '';
+      return \`
+        <li class="list-group-item">
+          <div class="fw-semibold text-capitalize">\${modality}</div>
+          \${timelineInfo}
+          <div class="text-muted">\${summary}</div>
+        </li>\`;
+    }).join('');
+    contextPreview.className = 'card-body small';
+    contextPreview.innerHTML = \`
+      <div class="mb-2">
+        <div class="fw-semibold">Timeline: \${envelope.timeline_id}</div>
+        <div class="text-muted">来源: \${envelope.source}</div>
+      </div>
+      <ul class="list-group list-group-flush">\${items}</ul>
+      <div class="mt-2 text-muted small">仅展示最近 5 条片段，更多内容请使用 API 查询。</div>\`;
+  }
+
+  async function fetchContext(timelineId) {
+    try {
+      const response = await fetch(\`/glass/context/\${timelineId}\`);
+      if (!response.ok) {
+        throw new Error('context not ready');
+      }
+      const payload = await response.json();
+      renderContext(payload.data);
+    } catch (err) {
+      console.warn('Failed to load context', err);
+    }
+  }
+
+  async function checkStatus(timelineId) {
+    try {
+      const response = await fetch(\`/glass/status/\${timelineId}\`);
+      if (!response.ok) {
+        throw new Error('status request failed');
+      }
+      const payload = await response.json();
+      const status = payload.data?.status;
+      if (!status) {
+        throw new Error('missing status field');
+      }
+      const entry = timelineState.get(timelineId);
+      if (entry) {
+        entry.status = status;
+        renderTimelineList();
+      }
+      if (status === 'completed') {
+        stopPolling(timelineId);
+        setFeedback('处理完成，正在加载上下文。', 'success');
+        fetchContext(timelineId);
+      } else if (status === 'failed') {
+        stopPolling(timelineId);
+        setFeedback('处理失败，请检查日志。', 'danger');
+      }
+    } catch (err) {
+      console.error(err);
+      stopPolling(timelineId);
+      setFeedback('查询状态时发生错误。', 'danger');
+    }
+  }
+
+  function beginPolling(timelineId) {
+    if (pollingHandles.has(timelineId)) {
+      return;
+    }
+    const handle = setInterval(() => checkStatus(timelineId), 3000);
+    pollingHandles.set(timelineId, handle);
+  }
+
+  function stopPolling(timelineId) {
+    const handle = pollingHandles.get(timelineId);
+    if (handle) {
+      clearInterval(handle);
+      pollingHandles.delete(timelineId);
+    }
+  }
+
+  async function uploadFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      setFeedback('正在上传...', 'info');
+      const response = await fetch('/glass/upload', {
+        method: 'POST',
+        body: formData
+      });
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => null);
+        const message = errorPayload?.message || '上传失败，请重试。';
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      const data = payload.data;
+      timelineState.set(data.timeline_id, {
+        filename: file.name,
+        status: data.status || 'pending'
+      });
+      renderTimelineList();
+      setFeedback('上传成功，开始处理。', 'success');
+
+      if (data.status === 'completed') {
+        fetchContext(data.timeline_id);
+      } else {
+        beginPolling(data.timeline_id);
+      }
+    } catch (err) {
+      console.error(err);
+      setFeedback(err.message, 'danger');
+    }
+  }
+
+  function handleFiles(fileList) {
+    if (!fileList || fileList.length === 0) {
+      return;
+    }
+    for (const file of fileList) {
+      if (!file.type.startsWith('video/')) {
+        setFeedback('只支持视频文件。', 'warning');
+        continue;
+      }
+      uploadFile(file);
+    }
+  }
+
+  dropzone.addEventListener('dragover', (event) => {
+    event.preventDefault();
+    dropzone.classList.add('glass-dropzone-active');
+  });
+
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('glass-dropzone-active');
+  });
+
+  dropzone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dropzone.classList.remove('glass-dropzone-active');
+    handleFiles(event.dataTransfer.files);
+  });
+
+  fileButton.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (event) => {
+    handleFiles(event.target.files);
+    event.target.value = '';
+  });
+})();
+</script>
+<style>
+  .glass-dropzone {
+    cursor: pointer;
+    background-color: rgba(13, 110, 253, 0.04);
+    border-style: dashed !important;
+    transition: background-color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+  }
+  .glass-dropzone-active {
+    background-color: rgba(13, 110, 253, 0.1);
+    border-color: #0d6efd !important;
+  }
+</style>
+{% endblock %}

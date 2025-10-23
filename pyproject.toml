@@ -27,6 +27,7 @@ dependencies = [
     "pyyaml",
     "pandas",
     "fastapi",
+    "python-multipart",
     "uvicorn",
     "openai",
     "jinja2",

@@ -240,22 +240,26 @@ class SQLiteBackend(IDocumentStorageBackend):
 
         # Insert default document
         try:
-        cursor.execute('''
-            INSERT INTO vaults (title, summary, content, document_type, tags, is_folder, is_deleted)
+            cursor.execute(
+                '''
+                INSERT INTO vaults (title, summary, content, document_type, tags, is_folder, is_deleted)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                'Start With Tutorial',
-                '',
-                default_content,
-                'vaults',
-                'guide,welcome,quick-start',
-                False,
-                False
-            ))
+                ''',
+                (
+                    'Start With Tutorial',
+                    '',
+                    default_content,
+                    'vaults',
+                    'guide,welcome,quick-start',
+                    False,
+                    False,
+                ),
+            )
             vault_id = cursor.lastrowid
             self.connection.commit()
             logger.info("Default Quick Start document inserted")
             from opencontext.managers.event_manager import get_event_manager, EventType
+
             event_type = EventType.SYSTEM_STATUS
             data = {
                 "title": "Start With Tutorial",
