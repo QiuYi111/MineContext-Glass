@@ -219,7 +219,11 @@ class DocumentProcessor(BaseContextProcessor):
             return []
         
         logger.info(f"Started chunking document {raw_context.object_id}...")
-        chunks = chunker.chunk(raw_context)
+        chunks_iter = chunker.chunk(raw_context)
+        if chunks_iter is None:
+            chunks = []
+        else:
+            chunks = list(chunks_iter)
         logger.info(f"Document {raw_context.object_id} was chunked into {len(chunks)} chunks.")
 
         if not chunks:
