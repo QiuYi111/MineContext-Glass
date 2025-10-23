@@ -90,10 +90,18 @@
 - `uv run pytest glass/tests/storage -q`
 
 ### Phase 3：处理层适配
-1. 在 `opencontext` 的处理管线中新增 Glass 路由：若输入包含 `timeline_id`，转入 `glass.processing`.
-2. 编写 `glass/processing/chunkers.py`，把 manifest 转为文本块与视觉特征请求。
-3. 视觉语义提取模块对接现有 embedding manager，必要时提供 `glass.processing.visual_encoder`.
-4. 为大模型消费生成统一的 `ContextEnvelope`，避免前后端耦合。
+
+**状态：✅ 已完成（2025-10-26）**
+
+**开发记录**
+1. 在 `opencontext` 处理管线中增加 Glass 路由：`ContextProcessorManager` 检测 `timeline_id` 或 `ContextSource.VIDEO` 时转入 `glass_timeline_processor`，保持旧源类型逻辑不受影响。
+2. 编写 `glass/processing/chunkers.py`，将 `AlignmentManifest` 转换为 MineContext 兼容的 `ProcessedContext`，消除多模态分支；文本复用 `SimpleTextChunker`，帧片段附带时间轴元数据。
+3. 实现 `glass.processing.visual_encoder` 与 `GlassTimelineProcessor`，前者复用全局 embedding 客户端进行帧向量化，后者统一写入 `GlassContextRepository` 并生成 `ContextEnvelope`。
+4. `processor_factory` 采用惰性注册，避免循环依赖；配置文件新增 `glass_timeline_processor` 开关并默认开启。
+
+**验证**
+- `pytest glass/tests/processing -q`
+- 管线抽样运行 `uv run opencontext glass ingest ...`（手动验证）
 
 ### Phase 4：消费层整合
 1. 消费层新增 `GlassContextSource` 适配器，读取 `ContextEnvelope`。
