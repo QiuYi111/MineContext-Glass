@@ -36,8 +36,8 @@ class ContextProcessorManager:
             "processors": {},
             "errors": 0,
         }
-        self._routing_table: Dict[ContextSource, List[str]] = {}
-        self._default_chain_by_format: Dict[ContentFormat, List[str]] = {}
+        self._routing_table: Dict[ContextSource, str] = {}
+        self._default_chain_by_format: Dict[ContentFormat, str] = {}
         self._define_routing()
         self._lock = Lock()
         self._max_workers = max_workers
@@ -91,6 +91,7 @@ class ContextProcessorManager:
             ContextSource.FILE: "document_processor",
             ContextSource.VAULT: "document_processor",
             ContextSource.TEXT: "document_processor",
+            ContextSource.VIDEO: "glass_timeline_processor",
         }
         self._default_chain_by_format = {}
     
@@ -139,9 +140,14 @@ class ContextProcessorManager:
         Process single input through processing chain
         """
         # 1. Dynamically select preprocessing chain based on input type (excluding merger and embedding)
-        processor_name = self._routing_table.get(initial_input.source)
-        if not processor_name:
-            processor_name = self._default_chain_by_format.get(initial_input.content_format, [])
+        processor_name: Optional[str] = None
+        additional_info = initial_input.additional_info or {}
+        if additional_info.get("timeline_id"):
+            processor_name = "glass_timeline_processor"
+        else:
+            processor_name = self._routing_table.get(initial_input.source)
+            if not processor_name:
+                processor_name = self._default_chain_by_format.get(initial_input.content_format)
 
         if not processor_name:
             logger.error(f"No processing component defined for source_type='{initial_input.source}' or content_format='{initial_input.content_format}', no processing will be performed")

@@ -18,6 +18,10 @@ from opencontext.interfaces import IContextProcessor
 from opencontext.context_processing.merger.context_merger import ContextMerger
 from opencontext.context_processing.processor.document_processor import DocumentProcessor
 from opencontext.context_processing.processor.screenshot_processor import ScreenshotProcessor
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from glass.processing.timeline_processor import GlassTimelineProcessor
 
 logger = get_logger(__name__)
 

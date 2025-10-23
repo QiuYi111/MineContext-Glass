@@ -23,6 +23,7 @@ class ContextSource(str, Enum):
     AI_CONVERSATION = "ai_conversation"
     TEXT = "text"
     OTHER = "other"
+    VIDEO = "video"
 
 class FileType(str, Enum):
     """File type enumeration"""

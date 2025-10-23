@@ -118,11 +118,24 @@ class ComponentInitializer:
             logger.info("Processing modules not found or not enabled in configuration")
             return
             
+        from opencontext.context_processing.processor.processor_factory import (
+            processor_factory as global_processor_factory,
+        )
+
         processor_factory = ProcessorFactory()
+        
+        # Lazily register Glass processor only when available to avoid circular imports
+        try:
+            from glass.processing.timeline_processor import GlassTimelineProcessor
+
+            processor_factory.register_processor_type("glass_timeline_processor", GlassTimelineProcessor)
+            global_processor_factory.register_processor_type("glass_timeline_processor", GlassTimelineProcessor)
+        except ImportError:
+            logger.debug("Glass timeline processor not available; skipping registration")
         
         # Now config.yaml structure is flattened, directly under processing
         # Create various processors
-        processor_types = ['document_processor', 'screenshot_processor']
+        processor_types = ['document_processor', 'screenshot_processor', 'glass_timeline_processor']
         
         for processor_type in processor_types:
             processor_config = processing_config.get(processor_type, {})

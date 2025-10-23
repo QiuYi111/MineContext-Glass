@@ -84,6 +84,10 @@ processing:
     enabled_delete: true
     max_raw_properties: 5
 
+  # Glass timeline processor configuration
+  glass_timeline_processor:
+    enabled: false
+
   # Context merger configuration
   context_merger:
     enabled: false
