@@ -199,7 +199,7 @@ def transcribe_media(
 
     model = whisperx.load_model(model_name, device=device, compute_type=compute_type)
     try:
-        result = model.transcribe(audio, batch_size=batch_size)
+        result = model.transcribe(audio, batch_size=batch_size,language="zh")
     finally:
         del model
         gc.collect()
