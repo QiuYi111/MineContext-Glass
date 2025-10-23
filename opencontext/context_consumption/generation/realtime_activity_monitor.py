@@ -24,6 +24,8 @@ from opencontext.models.enums import ContextType
 from opencontext.models.context import ProcessedContext
 from opencontext.models.enums import ContentFormat
 
+from glass.consumption import GlassContextSource
+
 logger = get_logger(__name__)
 
 
@@ -54,8 +56,9 @@ class RealtimeActivityMonitor:
     Generates a summary of recent activity, including the most valuable context information.
     """
     
-    def __init__(self):
+    def __init__(self, *, glass_source: GlassContextSource | None = None):
         self._activity_manager = None
+        self._glass_source = glass_source or GlassContextSource()
     
     @property
     def prompt_manager(self):
@@ -78,12 +81,21 @@ class RealtimeActivityMonitor:
             self._activity_manager = ActivityStorageManager(self.storage)
         return self._activity_manager
     
-    def generate_realtime_activity_summary(self, start_time: int, end_time: int) -> Optional[Dict[str, Any]]:
+    def generate_realtime_activity_summary(
+        self,
+        start_time: int,
+        end_time: int,
+        timeline_id: str | None = None,
+    ) -> Optional[Dict[str, Any]]:
         """Generate a real-time activity summary.
         """
         try:
             # Get context data
-            contexts = self._get_recent_contexts(start_time, end_time)
+            contexts = self._get_recent_contexts(
+                start_time,
+                end_time,
+                timeline_id=timeline_id,
+            )
             if not contexts:
                 logger.info(f"No activity records found in the time range {start_time} to {end_time}.")
                 return None
@@ -139,10 +151,38 @@ class RealtimeActivityMonitor:
         except Exception as e:
             logger.exception(f"Failed to generate real-time activity summary: {e}")
             return None
-    def _get_recent_contexts(self, start_time: int, end_time: int) -> Dict[str, List[ProcessedContext]]:
+    def _get_recent_contexts(
+        self,
+        start_time: int,
+        end_time: int,
+        timeline_id: str | None = None,
+    ) -> Dict[str, List[ProcessedContext]]:
         """Get a dictionary of recent context data, with context type as the key and a list of contexts as the value.
         """
         try:
+            if timeline_id:
+                grouped = self._glass_source.group_by_context_type(timeline_id)
+                if not grouped:
+                    return {}
+
+                result: Dict[str, List[ProcessedContext]] = {}
+                for context_type, context_list in grouped.items():
+                    filtered = [
+                        ctx for ctx in context_list
+                        if self._within_range(ctx, start_time, end_time)
+                    ]
+                    if not filtered:
+                        continue
+                    filtered.sort(
+                        key=lambda ctx: (
+                            (ctx.metadata or {}).get("segment_end", 0.0),
+                            ctx.properties.create_time,
+                        ),
+                        reverse=True,
+                    )
+                    result[context_type] = filtered
+                return result
+
             filters = {
                 "update_time_ts": {
                     "$gte": start_time,
@@ -165,7 +205,19 @@ class RealtimeActivityMonitor:
             
         except Exception as e:
             logger.exception(f"Failed to get recent contexts: {e}")
-            return []
+            return {}
+
+    def _within_range(self, context: ProcessedContext, start_time: int, end_time: int) -> bool:
+        try:
+            timestamp = int(context.properties.update_time.timestamp())
+        except Exception:
+            return True
+
+        if start_time and timestamp < start_time:
+            return False
+        if end_time and timestamp > end_time:
+            return False
+        return True
     
     def _generate_concise_summary(
         self, 

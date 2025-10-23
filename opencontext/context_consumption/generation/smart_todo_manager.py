@@ -19,8 +19,10 @@ from opencontext.llm.global_vlm_client import generate_with_messages
 from opencontext.tools.tool_definitions import ALL_PROFILE_TOOL_DEFINITIONS, ALL_RETRIEVAL_TOOL_DEFINITIONS, ALL_TOOL_DEFINITIONS
 from opencontext.utils.logging_utils import get_logger
 from opencontext.config.global_config import get_prompt_manager
-from opencontext.models.context import ContextType, Vectorize
+from opencontext.models.context import ContextType, Vectorize, ProcessedContext
 from opencontext.utils.json_parser import parse_json_from_response
+
+from glass.consumption import GlassContextSource
 
 logger = get_logger(__name__)
 
@@ -48,6 +50,9 @@ class SmartTodoManager:
     Intelligently identifies and generates to-do items based on user activity context.
     """
 
+    def __init__(self, *, glass_source: GlassContextSource | None = None):
+        self._glass_source = glass_source or GlassContextSource()
+
     @property
     def prompt_manager(self):
         return get_prompt_manager()    
@@ -72,7 +77,12 @@ class SmartTodoManager:
         }
         return priority_map.get(priority.lower(), 0)
     
-    def generate_todo_tasks(self, start_time: int, end_time: int) -> Optional[str]:  
+    def generate_todo_tasks(
+        self,
+        start_time: int,
+        end_time: int,
+        timeline_id: str | None = None,
+    ) -> Optional[str]:
         """
         Generate Todo tasks based on recent activity, combining activity insights and historical todo information.
         """
@@ -80,7 +90,12 @@ class SmartTodoManager:
             # 1. Get insights from recent activities
             activity_insights = self._get_recent_activity_insights(start_time, end_time)
             # 2. Get regular context data
-            contexts = self._get_task_relevant_contexts(start_time, end_time, activity_insights)
+            contexts = self._get_task_relevant_contexts(
+                start_time,
+                end_time,
+                activity_insights,
+                timeline_id=timeline_id,
+            )
             # 3. Get historical todo completion status
             historical_todos = self._get_historical_todos()
             # 4. Synthesize all information to generate high-quality todos
@@ -188,9 +203,36 @@ class SmartTodoManager:
             logger.exception(f"Failed to get historical todos: {e}")
             return []
 
-    def _get_task_relevant_contexts(self, start_time: int, end_time: int, activity_insights: Dict[str, Any] = None) -> List[Any]:
+    def _get_task_relevant_contexts(
+        self,
+        start_time: int,
+        end_time: int,
+        activity_insights: Dict[str, Any] = None,
+        *,
+        timeline_id: str | None = None,
+    ) -> List[Any]:
         """Get context data relevant to the task."""
         try:
+            if timeline_id:
+                contexts = [
+                    ctx for ctx in self._glass_source.get_processed_contexts(timeline_id)
+                    if self._within_range(ctx, start_time, end_time)
+                ]
+                if contexts:
+                    contexts.sort(
+                        key=lambda ctx: (
+                            (ctx.metadata or {}).get("segment_end", 0.0),
+                            ctx.properties.create_time,
+                        ),
+                        reverse=True,
+                    )
+                logger.info(
+                    "Retrieved %d Glass contexts for todo analysis on timeline %s",
+                    len(contexts),
+                    timeline_id,
+                )
+                return [ctx.get_llm_context_string() for ctx in contexts]
+
             context_types = [
                 ContextType.ACTIVITY_CONTEXT.value,
                 ContextType.SEMANTIC_CONTEXT.value,
@@ -234,6 +276,18 @@ class SmartTodoManager:
         except Exception as e:
             logger.exception(f"Failed to get task-relevant context: {e}")
             return []
+
+    def _within_range(self, context: ProcessedContext, start_time: int, end_time: int) -> bool:
+        try:
+            timestamp = int(context.properties.create_time.timestamp())
+        except Exception:
+            return True
+
+        if start_time and timestamp < start_time:
+            return False
+        if end_time and timestamp > end_time:
+            return False
+        return True
 
     def _extract_tasks_from_contexts_enhanced(
         self, context_data: List[Any], start_time: int, end_time: int,

@@ -174,6 +174,7 @@ class SQLiteBackend(IDocumentStorageBackend):
                 modality TEXT NOT NULL,
                 content_ref TEXT NOT NULL,
                 embedding_ready BOOLEAN DEFAULT 0,
+                context_type TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(context_id)
@@ -203,6 +204,13 @@ class SQLiteBackend(IDocumentStorageBackend):
                 '''
                 ALTER TABLE glass_multimodal_context
                 ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                '''
+            )
+        if 'context_type' not in columns:
+            cursor.execute(
+                '''
+                ALTER TABLE glass_multimodal_context
+                ADD COLUMN context_type TEXT
                 '''
             )
 

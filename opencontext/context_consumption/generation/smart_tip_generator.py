@@ -23,6 +23,8 @@ from opencontext.models.enums import ContextType
 from opencontext.storage.base_storage import DocumentData
 from opencontext.models.context import ProcessedContext
 
+from glass.consumption import GlassContextSource
+
 logger = get_logger(__name__)
 
 
@@ -42,8 +44,9 @@ class SmartTipGenerator:
     Generates personalized reminders and suggestions based on the user's recent activity patterns.
     """
     
-    def __init__(self):
+    def __init__(self, *, glass_source: GlassContextSource | None = None):
         self._activity_manager = None
+        self._glass_source = glass_source or GlassContextSource()
     
     @property
     def prompt_manager(self):
@@ -66,13 +69,22 @@ class SmartTipGenerator:
             self._activity_manager = ActivityStorageManager(self.storage)
         return self._activity_manager
     
-    def generate_smart_tip(self, start_time: int, end_time: int) -> Optional[str]:
+    def generate_smart_tip(
+        self,
+        start_time: int,
+        end_time: int,
+        timeline_id: str | None = None,
+    ) -> Optional[str]:
         """
         Generate a smart tip, combining activity patterns and multi-dimensional information.
         """
         try:            
             # 1. Get real-time context
-            contexts = self._get_comprehensive_contexts(start_time, end_time)
+            contexts = self._get_comprehensive_contexts(
+                start_time,
+                end_time,
+                timeline_id=timeline_id,
+            )
             
             # 2. Analyze activity patterns
             activity_patterns = self._analyze_activity_patterns(hours=6)
@@ -221,9 +233,35 @@ class SmartTipGenerator:
             logger.exception(f"Failed to get historical tips: {e}")
             return []
 
-    def _get_comprehensive_contexts(self, start_time: int, end_time: int) -> List[Any]:
+    def _get_comprehensive_contexts(
+        self,
+        start_time: int,
+        end_time: int,
+        timeline_id: str | None = None,
+    ) -> List[ProcessedContext]:
         """Get comprehensive context data for analysis."""
         try:
+            if timeline_id:
+                contexts = [
+                    ctx for ctx in self._glass_source.get_processed_contexts(timeline_id)
+                    if self._within_range(ctx, start_time, end_time)
+                ]
+                if not contexts:
+                    return []
+                contexts.sort(
+                    key=lambda ctx: (
+                        (ctx.metadata or {}).get("segment_end", 0.0),
+                        ctx.properties.create_time,
+                    ),
+                    reverse=True,
+                )
+                logger.info(
+                    "Retrieved %d Glass contexts for timeline %s",
+                    len(contexts),
+                    timeline_id,
+                )
+                return contexts
+
             filters = {
                 "create_time_ts": {
                     "$gte": start_time,
@@ -261,6 +299,18 @@ class SmartTipGenerator:
         except Exception as e:
             logger.exception(f"Failed to get context data: {e}")
             return []
+
+    def _within_range(self, context: ProcessedContext, start_time: int, end_time: int) -> bool:
+        try:
+            timestamp = int(context.properties.create_time.timestamp())
+        except Exception:
+            return True
+
+        if start_time and timestamp < start_time:
+            return False
+        if end_time and timestamp > end_time:
+            return False
+        return True
     
     def _generate_intelligent_tip_with_patterns(
         self, 

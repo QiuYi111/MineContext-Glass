@@ -104,9 +104,18 @@
 - 管线抽样运行 `uv run opencontext glass ingest ...`（手动验证）
 
 ### Phase 4：消费层整合
-1. 消费层新增 `GlassContextSource` 适配器，读取 `ContextEnvelope`。
-2. 报告、提醒、任务模块在拉取上下文时增加对 `timeline_id` 的过滤与排序规则（例如优先最近片段）。
-3. 写端到端测试，模拟视频→日报生成流程（可用 mock embedding）。
+**状态：✅ 已完成（2025-10-29）**
+
+**开发记录**
+1. 新增 `glass.consumption.GlassContextSource`，封装 `GlassContextRepository.load_envelope()` 并按时间线片段逆序输出 `ProcessedContext`。
+2. `GlassContextRepository` 追加 `context_type` 元数据写入与 `load_envelope()`，同时对 `glass_multimodal_context` schema 增列，兼容旧数据。
+3. 报告 (`ReportGenerator`)、实时活动、提醒、待办等消费器接受可选 `timeline_id`，优先走 Glass 数据后再回落旧逻辑，排序统一使用 `segment_end` 元信息。
+4. CLI 引入 `opencontext glass report` 命令，支持命令行生成时间线导向的日报并可落盘。
+5. FastAPI 调试端点增加 `timeline_id` 查询参数，方便外部调试 Glass 上下文。
+
+**验证**
+- `UV_CACHE_DIR="$(pwd)/.uv-cache" uv run pytest glass/tests/storage glass/tests/consumption glass/tests/cli -q`
+- 手动运行 `opencontext glass report --timeline-id <demo> --lookback-minutes 30`（需先完成 ingestion）确保 CLI 路径通畅。
 
 ### Phase 5：Web UI 与上传流程
 1. `glass/ui/` 中搭建前端骨架（可先用现有 WebUI 框架）；提供拖拽上传、进度显示、任务刷新。

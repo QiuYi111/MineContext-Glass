@@ -27,6 +27,7 @@ def _bootstrap_schema(connection: sqlite3.Connection) -> None:
             modality TEXT NOT NULL,
             content_ref TEXT NOT NULL,
             embedding_ready BOOLEAN DEFAULT 0,
+            context_type TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
@@ -34,8 +35,15 @@ def _bootstrap_schema(connection: sqlite3.Connection) -> None:
     )
 
 
-def _make_context(text: str, context_id: str | None = None) -> ProcessedContext:
-    now = datetime.datetime.now(datetime.timezone.utc)
+def _make_context(
+    text: str,
+    context_id: str | None = None,
+    *,
+    context_type: ContextType = ContextType.SEMANTIC_CONTEXT,
+    metadata: dict | None = None,
+    create_time: datetime.datetime | None = None,
+) -> ProcessedContext:
+    now = create_time or datetime.datetime.now(datetime.timezone.utc)
     raw = RawContextProperties(
         content_format=ContentFormat.TEXT,
         source=ContextSource.OTHER,
@@ -54,7 +62,7 @@ def _make_context(text: str, context_id: str | None = None) -> ProcessedContext:
         keywords=[],
         entities=[],
         tags=[],
-        context_type=ContextType.SEMANTIC_CONTEXT,
+        context_type=context_type,
         confidence=1,
         importance=1,
     )
@@ -64,16 +72,22 @@ def _make_context(text: str, context_id: str | None = None) -> ProcessedContext:
         properties=properties,
         extracted_data=extracted,
         vectorize=vectorize,
+        metadata=metadata or {},
     )
 
 
 class _FakeStorage:
     def __init__(self) -> None:
-        self.contexts: list[ProcessedContext] = []
+        self.contexts: dict[tuple[str, str], ProcessedContext] = {}
 
     def batch_upsert_processed_context(self, contexts: list[ProcessedContext]):
-        self.contexts.extend(contexts)
+        for context in contexts:
+            key = (context.extracted_data.context_type.value, context.id)
+            self.contexts[key] = context
         return [context.id for context in contexts]
+
+    def get_processed_context(self, context_id: str, context_type: str):
+        return self.contexts.get((context_type, context_id))
 
 
 def _make_repo(connection: sqlite3.Connection, storage: _FakeStorage | None = None) -> GlassContextRepository:
@@ -99,7 +113,7 @@ def test_upsert_persists_and_fetches_segments() -> None:
 
     ids = repo.upsert_aligned_segments([item])
     assert ids == [context.id]
-    assert storage.contexts == [context]
+    assert list(storage.contexts.values()) == [context]
 
     rows = repo.fetch_by_timeline("timeline-1")
     assert len(rows) == 1
@@ -107,6 +121,7 @@ def test_upsert_persists_and_fetches_segments() -> None:
     assert row["context_id"] == context.id
     assert row["embedding_ready"] == 1
     assert row["content_ref"] == "segment-001"
+    assert row["context_type"] == context.extracted_data.context_type.value
 
 
 def test_upsert_updates_existing_record() -> None:
@@ -141,6 +156,7 @@ def test_upsert_updates_existing_record() -> None:
     assert row["context_id"] == context_id
     assert row["content_ref"] == "frame-b.png"
     assert row["embedding_ready"] == 1
+    assert row["context_type"] == updated_context.extracted_data.context_type.value
 
 
 def test_upsert_rolls_back_on_failure() -> None:
@@ -165,3 +181,57 @@ def test_upsert_rolls_back_on_failure() -> None:
 
     # Ensure transaction is cleaned up and no lingering state remains.
     assert not connection.in_transaction
+
+
+def test_load_envelope_recovers_contexts_sorted_by_segment() -> None:
+    connection = sqlite3.connect(":memory:")
+    storage = _FakeStorage()
+    repo = _make_repo(connection, storage)
+
+    base_time = datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc)
+
+    audio_context = _make_context(
+        "audio",
+        context_type=ContextType.ACTIVITY_CONTEXT,
+        metadata={
+            "segment_start": 0.0,
+            "segment_end": 5.0,
+            "source_video": "videos/sample.mp4",
+        },
+        create_time=base_time,
+    )
+    frame_context = _make_context(
+        "frame",
+        context_type=ContextType.STATE_CONTEXT,
+        metadata={
+            "segment_start": 5.0,
+            "segment_end": 10.0,
+            "source_video": "videos/sample.mp4",
+        },
+        create_time=base_time + datetime.timedelta(seconds=1),
+    )
+
+    repo.upsert_aligned_segments(
+        [
+            MultimodalContextItem(
+                context=audio_context,
+                timeline_id="timeline-42",
+                modality=Modality.AUDIO,
+                content_ref="segment-a",
+                embedding_ready=True,
+            ),
+            MultimodalContextItem(
+                context=frame_context,
+                timeline_id="timeline-42",
+                modality=Modality.FRAME,
+                content_ref="frame-b.png",
+                embedding_ready=True,
+            ),
+        ]
+    )
+
+    envelope = repo.load_envelope("timeline-42")
+    assert envelope is not None
+    assert envelope.timeline_id == "timeline-42"
+    assert envelope.source == "videos/sample.mp4"
+    assert [item.context.id for item in envelope.items] == [frame_context.id, audio_context.id]

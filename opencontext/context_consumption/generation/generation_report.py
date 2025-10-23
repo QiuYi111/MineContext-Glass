@@ -18,6 +18,9 @@ from opencontext.tools.tool_definitions import ALL_TOOL_DEFINITIONS
 from opencontext.tools.tools_executor import ToolsExecutor
 from opencontext.utils.logging_utils import get_logger
 from opencontext.models.enums import ContextType
+from opencontext.models.context import ProcessedContext
+
+from glass.consumption import GlassContextSource
 
 logger = get_logger(__name__)
 
@@ -26,8 +29,9 @@ class ReportGenerator:
     Context consumer - directly retrieves context from the database, calls the large model to generate results, and supports tool calls to obtain background information.
     """
     
-    def __init__(self):
+    def __init__(self, *, glass_source: GlassContextSource | None = None):
         self.tools_executor = ToolsExecutor()
+        self._glass_source = glass_source or GlassContextSource()
     
     @property
     def prompt_manager(self):
@@ -38,60 +42,82 @@ class ReportGenerator:
         """Get storage from the global singleton."""
         return get_storage()
     
-    async def generate_report(self, start_time: int, end_time: int) -> str:
+    async def generate_report(
+        self,
+        start_time: int,
+        end_time: int,
+        timeline_id: str | None = None,
+    ) -> str:
         """
         Generate an activity report for a specified time range.
         
         Args:
             start_time: The start time as a Unix timestamp in seconds.
             end_time: The end time as a Unix timestamp in seconds.
+            timeline_id: Optional Glass timeline to prioritise.
             
         Returns:
             str: The activity report in Markdown format.
         """
         try:
+            if timeline_id:
+                timeline_contexts = self._get_timeline_context_strings(
+                    timeline_id,
+                    start_time,
+                    end_time,
+                )
+                if timeline_contexts:
+                    result = await self._generate_report_with_llm(
+                        timeline_contexts,
+                        start_time,
+                        end_time,
+                    )
+                    if result:
+                        await self._persist_report(result)
+                    return result or ""
+
             # Calculate the time range in hours
             time_range_hours = (end_time - start_time) / 3600
             
             # If the time range exceeds 1 hour, use chunked processing
             result = None
             if time_range_hours > 1:
-                result = await self._generate_chunked_report(start_time, end_time)
+                result = await self._generate_chunked_report(
+                    start_time,
+                    end_time,
+                    timeline_id=timeline_id,
+                )
             else:
-                result = await self._generate_single_report(start_time, end_time)
+                result = await self._generate_single_report(
+                    start_time,
+                    end_time,
+                    timeline_id=timeline_id,
+                )
             if not result:
-                return result
+                return result or ""
 
-            from opencontext.managers.event_manager import EventType, publish_event
-            from opencontext.storage.global_storage import get_storage
-            from opencontext.models.enums import VaultType
-            now = datetime.datetime.now()
-            report_id = get_storage().insert_vaults(
-                title=f"Daily Report - {now.strftime('%Y-%m-%d')}",
-                summary="",
-                content=result,
-                document_type=VaultType.DAILY_REPORT.value
-            )
-            publish_event(
-                event_type=EventType.DAILY_SUMMARY_GENERATED,
-                data={
-                    "doc_id": str(report_id),
-                    "doc_type": "vaults",
-                    "title": f"Daily Report - {now.strftime('%Y-%m-%d')}",
-                    "content": result
-                }
-            )
+            await self._persist_report(result)
             return result
         except Exception as e:
             logger.exception(f"Error generating activity report: {e}")
             return f"Error generating activity report: {str(e)}"
     
-    async def _generate_single_report(self, start_time: int, end_time: int) -> str:
+    async def _generate_single_report(
+        self,
+        start_time: int,
+        end_time: int,
+        *,
+        timeline_id: str | None = None,
+    ) -> str:
         """
         Generate an activity report for a single time period.
         """
         # 1. Directly get context from the database
-        contexts = self._get_contexts_from_db(start_time, end_time)
+        contexts = self._get_contexts_from_db(
+            start_time,
+            end_time,
+            timeline_id=timeline_id,
+        )
         
         if not contexts:
             return f"No activity records found in the specified time range.\n\nTime range: {self._format_timestamp(start_time)} to {self._format_timestamp(end_time)}"
@@ -101,7 +127,13 @@ class ReportGenerator:
         
         return report
     
-    async def _generate_chunked_report(self, start_time: int, end_time: int) -> str:
+    async def _generate_chunked_report(
+        self,
+        start_time: int,
+        end_time: int,
+        *,
+        timeline_id: str | None = None,
+    ) -> str:
         """
         Generate a chunked activity report (for periods longer than 1 hour), using coroutines for concurrent processing to improve performance.
         """
@@ -115,7 +147,10 @@ class ReportGenerator:
             chunk_end = min(current_time + 3600, end_time)  # 1-hour chunks
             hour_chunks.append((current_time, chunk_end))
             current_time = chunk_end
-        hourly_summaries = await self._process_chunks_concurrently(hour_chunks)
+        hourly_summaries = await self._process_chunks_concurrently(
+            hour_chunks,
+            timeline_id=timeline_id,
+        )
         
         if not hourly_summaries:
             return f"No activity records found in the specified time range.\n\nTime range: {self._format_timestamp(start_time)} to {self._format_timestamp(end_time)}"
@@ -123,12 +158,21 @@ class ReportGenerator:
         # Summarize all hourly reports
         return await self._generate_final_report_from_summaries(hourly_summaries, start_time, end_time)
     
-    async def _process_chunks_concurrently(self, hour_chunks: list) -> list:
+    async def _process_chunks_concurrently(
+        self,
+        hour_chunks: list,
+        *,
+        timeline_id: str | None = None,
+    ) -> list:
         """Process all time chunks concurrently."""
         import asyncio
         tasks = []
         for chunk_start, chunk_end in hour_chunks:
-            task = self._process_single_chunk_async(chunk_start, chunk_end)
+            task = self._process_single_chunk_async(
+                chunk_start,
+                chunk_end,
+                timeline_id=timeline_id,
+            )
             tasks.append(task)
         semaphore = asyncio.Semaphore(5)
         
@@ -148,9 +192,19 @@ class ReportGenerator:
         
         return hourly_summaries
     
-    async def _process_single_chunk_async(self, chunk_start: int, chunk_end: int) -> dict:
+    async def _process_single_chunk_async(
+        self,
+        chunk_start: int,
+        chunk_end: int,
+        *,
+        timeline_id: str | None = None,
+    ) -> dict:
         """Process a single time chunk asynchronously."""
-        contexts = self._get_contexts_from_db(chunk_start, chunk_end)
+        contexts = self._get_contexts_from_db(
+            chunk_start,
+            chunk_end,
+            timeline_id=timeline_id,
+        )
         if not contexts:
             return None
 
@@ -231,7 +285,13 @@ class ReportGenerator:
         )
         return report
     
-    def _get_contexts_from_db(self, start_time: int, end_time: int) -> List[Dict]:
+    def _get_contexts_from_db(
+        self,
+        start_time: int,
+        end_time: int,
+        *,
+        timeline_id: str | None = None,
+    ) -> List[Dict]:
         """
         Directly retrieve context information from the database for a specified time range.
         """
@@ -243,6 +303,8 @@ class ReportGenerator:
                     filters['create_time_ts']['$gte'] = start_time
                 if end_time:
                     filters['create_time_ts']['$lte'] = end_time
+            if timeline_id:
+                filters["timeline_id"] = timeline_id
             
             context_types = [ContextType.ACTIVITY_CONTEXT.value, ContextType.SEMANTIC_CONTEXT.value]
             
@@ -259,7 +321,16 @@ class ReportGenerator:
                 contexts.extend(context_list)
             
             # Sort by time
-            contexts.sort(key=lambda x: x.properties.create_time)
+            if timeline_id:
+                contexts.sort(
+                    key=lambda x: (
+                        (x.metadata or {}).get("segment_end", 0.0),
+                        x.properties.create_time,
+                    ),
+                    reverse=True,
+                )
+            else:
+                contexts.sort(key=lambda x: x.properties.create_time)
             
             # Convert to the format for large model input
             contexts = [context.get_llm_context_string() for context in contexts]
@@ -270,6 +341,73 @@ class ReportGenerator:
         except Exception as e:
             logger.exception(f"Failed to get context from the database: {e}")
             return []
+
+    def _get_timeline_context_strings(
+        self,
+        timeline_id: str,
+        start_time: int,
+        end_time: int,
+    ) -> List[str]:
+        contexts = self._glass_source.get_processed_contexts(timeline_id)
+        filtered: List[ProcessedContext] = []
+        for context in contexts:
+            if self._is_within_range(context, start_time, end_time):
+                filtered.append(context)
+        if not filtered:
+            return []
+
+        result: List[str] = []
+        for context in filtered:
+            try:
+                result.append(context.get_llm_context_string())
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Failed to serialise context %s for timeline %s: %s",
+                    context.id,
+                    timeline_id,
+                    exc,
+                )
+        return result
+
+    def _is_within_range(
+        self,
+        context: ProcessedContext,
+        start_time: int,
+        end_time: int,
+    ) -> bool:
+        try:
+            create_time = context.properties.create_time
+            timestamp = int(create_time.timestamp())
+        except Exception:
+            return True
+
+        if start_time and timestamp < start_time:
+            return False
+        if end_time and timestamp > end_time:
+            return False
+        return True
+
+    async def _persist_report(self, result: str) -> None:
+        from opencontext.managers.event_manager import EventType, publish_event
+        from opencontext.storage.global_storage import get_storage
+        from opencontext.models.enums import VaultType
+
+        now = datetime.datetime.now()
+        report_id = get_storage().insert_vaults(
+            title=f"Daily Report - {now.strftime('%Y-%m-%d')}",
+            summary="",
+            content=result,
+            document_type=VaultType.DAILY_REPORT.value
+        )
+        publish_event(
+            event_type=EventType.DAILY_SUMMARY_GENERATED,
+            data={
+                "doc_id": str(report_id),
+                "doc_type": "vaults",
+                "title": f"Daily Report - {now.strftime('%Y-%m-%d')}",
+                "content": result
+            }
+        )
 
     async def _generate_report_with_llm(self, contexts: List[Dict], start_time: int, end_time: int) -> str:
         """

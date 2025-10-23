@@ -8,11 +8,13 @@ Command-line interface - provides the entry point for command-line tools
 """
 
 import argparse
+import asyncio
 import sys
 import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -155,6 +157,46 @@ def parse_args() -> argparse.Namespace:
         help="Number of worker processes (default: 1)"
     )
 
+    # Glass utilities
+    glass_parser = subparsers.add_parser("glass", help="Glass timeline utilities")
+    glass_parser.add_argument(
+        "--config",
+        type=str,
+        help="Configuration file path"
+    )
+    glass_subparsers = glass_parser.add_subparsers(dest="glass_command", help="Glass commands")
+
+    glass_report_parser = glass_subparsers.add_parser(
+        "report",
+        help="Generate an activity report focused on a Glass timeline"
+    )
+    glass_report_parser.add_argument(
+        "--timeline-id",
+        required=True,
+        help="Timeline identifier produced during Glass ingestion"
+    )
+    glass_report_parser.add_argument(
+        "--start",
+        type=str,
+        help="Report start time (ISO8601 string or Unix timestamp seconds)"
+    )
+    glass_report_parser.add_argument(
+        "--end",
+        type=str,
+        help="Report end time (ISO8601 string or Unix timestamp seconds)"
+    )
+    glass_report_parser.add_argument(
+        "--lookback-minutes",
+        type=int,
+        default=60,
+        help="Fallback lookback window in minutes when start/end are omitted (default: 60)"
+    )
+    glass_report_parser.add_argument(
+        "--output",
+        type=str,
+        help="Optional path to write the generated report"
+    )
+
     return parser.parse_args()
 
 
@@ -227,6 +269,109 @@ def handle_start(args: argparse.Namespace) -> int:
         _run_headless_mode(lab_instance)
 
     return 0
+
+
+def _parse_time_argument(value: Optional[str]) -> Optional[int]:
+    """Parse timestamp arguments accepting Unix seconds or ISO8601 strings."""
+    if value is None:
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"Invalid time format '{value}'. Use ISO8601 or Unix timestamp.") from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
+def _resolve_report_window(args: argparse.Namespace) -> tuple[int, int]:
+    """Resolve start/end timestamps for Glass report generation."""
+    start_ts = _parse_time_argument(getattr(args, "start", None))
+    end_ts = _parse_time_argument(getattr(args, "end", None))
+
+    if start_ts is None or end_ts is None:
+        now_ts = int(datetime.now(tz=timezone.utc).timestamp())
+        end_ts = end_ts or now_ts
+        lookback_minutes = max(getattr(args, "lookback_minutes", 60), 1)
+        start_ts = start_ts or end_ts - lookback_minutes * 60
+
+    if end_ts <= start_ts:
+        raise ValueError("End time must be greater than start time.")
+
+    return start_ts, end_ts
+
+
+def _ensure_storage_initialized() -> None:
+    """Ensure storage layers are initialised for CLI commands."""
+    from opencontext.storage.global_storage import get_global_storage
+
+    storage_manager = get_global_storage()
+    if not storage_manager.is_initialized():
+        storage = storage_manager.get_storage()
+        if storage is None:
+            raise RuntimeError("Storage is not initialized; check configuration.")
+
+
+def _handle_glass_report(args: argparse.Namespace) -> int:
+    """Handle `opencontext glass report` command."""
+    from glass.consumption import GlassContextSource
+    from opencontext.context_consumption.generation.generation_report import ReportGenerator
+
+    try:
+        _ensure_storage_initialized()
+        start_ts, end_ts = _resolve_report_window(args)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to prepare Glass report parameters: %s", exc)
+        return 1
+
+    generator = ReportGenerator(glass_source=GlassContextSource())
+    try:
+        report = asyncio.run(
+            generator.generate_report(
+                start_ts,
+                end_ts,
+                timeline_id=args.timeline_id,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to generate Glass report: %s", exc)
+        return 1
+
+    output_path = getattr(args, "output", None)
+    if output_path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(report or "", encoding="utf-8")
+        logger.info("Report written to %s", path)
+    else:
+        if report:
+            print(report)
+        else:
+            logger.info("Report generation returned empty content.")
+
+    return 0
+
+
+def handle_glass(args: argparse.Namespace) -> int:
+    """Dispatch Glass sub-commands."""
+    if not getattr(args, "glass_command", None):
+        logger.error("No Glass sub-command specified. Use 'opencontext glass --help' for details.")
+        return 1
+
+    if args.glass_command == "report":
+        return _handle_glass_report(args)
+
+    logger.error("Unknown Glass sub-command: %s", args.glass_command)
+    return 1
+
+
 def _setup_logging(config_path: Optional[str]) -> None:
     """Setup logging configuration.
     
@@ -257,9 +402,11 @@ def main() -> int:
 
     if args.command == "start":
         return handle_start(args)
-    else:
-        logger.error(f"Unknown command: {args.command}")
-        return 1
+    if args.command == "glass":
+        return handle_glass(args)
+
+    logger.error(f"Unknown command: {args.command}")
+    return 1
 
 
 if __name__ == "__main__":

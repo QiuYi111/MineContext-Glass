@@ -144,6 +144,7 @@ async def update_debug_todo_status(
 async def manual_generate_debug_report(
     start_time: Optional[int] = Query(None, description="Start timestamp"),
     end_time: Optional[int] = Query(None, description="End timestamp"),
+    timeline_id: Optional[str] = Query(None, description="Glass timeline identifier"),
     opencontext: OpenContext = Depends(get_context_lab),
     _auth: str = auth_dependency
 ):
@@ -161,7 +162,11 @@ async def manual_generate_debug_report(
             end_time = int(now.timestamp())
             start_time = int((now - timedelta(days=1)).timestamp())
         
-        report_content = await opencontext.consumption_manager._activity_generator.generate_report(start_time, end_time)
+        report_content = await opencontext.consumption_manager._activity_generator.generate_report(
+            start_time,
+            end_time,
+            timeline_id=timeline_id,
+        )
         
         if report_content:
             from datetime import datetime
@@ -189,6 +194,7 @@ async def manual_generate_debug_report(
 @router.post("/api/debug/generate/activity")
 async def manual_generate_debug_activity(
     minutes: int = Query(15, description="Review minutes"),
+    timeline_id: Optional[str] = Query(None, description="Glass timeline identifier"),
     opencontext: OpenContext = Depends(get_context_lab),
     _auth: str = auth_dependency
 ):
@@ -202,7 +208,11 @@ async def manual_generate_debug_activity(
         
         start_time = int(datetime.now().timestamp()) - (minutes * 60)
         end_time = int(datetime.now().timestamp())
-        activity_result = opencontext.consumption_manager._real_activity_monitor.generate_realtime_activity_summary(start_time, end_time)
+        activity_result = opencontext.consumption_manager._real_activity_monitor.generate_realtime_activity_summary(
+            start_time,
+            end_time,
+            timeline_id=timeline_id,
+        )
         
         if activity_result:
             return convert_resp(data={
@@ -222,6 +232,7 @@ async def manual_generate_debug_activity(
 @router.post("/api/debug/generate/tips")
 async def manual_generate_debug_tips(
     lookback_minutes: int = Query(60, description="Lookback minutes"),
+    timeline_id: Optional[str] = Query(None, description="Glass timeline identifier"),
     opencontext: OpenContext = Depends(get_context_lab),
     _auth: str = auth_dependency
 ):
@@ -235,7 +246,11 @@ async def manual_generate_debug_tips(
         
         end_time = int(datetime.now().timestamp())
         start_time = end_time - (lookback_minutes * 60)
-        tip_id = opencontext.consumption_manager._smart_tip_generator.generate_smart_tip(start_time, end_time)
+        tip_id = opencontext.consumption_manager._smart_tip_generator.generate_smart_tip(
+            start_time,
+            end_time,
+            timeline_id=timeline_id,
+        )
         
         if tip_id:
             return convert_resp(data={
@@ -253,6 +268,7 @@ async def manual_generate_debug_tips(
 @router.post("/api/debug/generate/todos")
 async def manual_generate_debug_todos(
     lookback_minutes: int = Query(30, description="Lookback minutes"),
+    timeline_id: Optional[str] = Query(None, description="Glass timeline identifier"),
     opencontext: OpenContext = Depends(get_context_lab),
     _auth: str = auth_dependency
 ):
@@ -269,6 +285,7 @@ async def manual_generate_debug_todos(
         todo_id = opencontext.consumption_manager._smart_todo_manager.generate_todo_tasks(
             start_time=start_time,
             end_time=end_time,
+            timeline_id=timeline_id,
         )
         
         if todo_id:
@@ -487,6 +504,7 @@ async def generate_with_custom_prompts(
     lookback_minutes: int = Query(15, description="Lookback minutes"),
     start_time: int = Query(None, description="Start timestamp"),
     end_time: int = Query(None, description="End timestamp"),
+    timeline_id: Optional[str] = Query(None, description="Glass timeline identifier"),
     opencontext: OpenContext = Depends(get_context_lab),
     _auth: str = auth_dependency
 ):
@@ -512,8 +530,12 @@ async def generate_with_custom_prompts(
                 prompt_manager.prompts["generation"]["smart_tip_generation"] = custom_prompts["generation.smart_tip_generation"]
 
             try:
+                now_ts = int(datetime.now().timestamp())
+                window = (lookback_minutes or 15) * 60
                 tip_id = opencontext.consumption_manager._smart_tip_generator.generate_smart_tip(
-                    lookback_minutes=lookback_minutes or 15
+                    start_time=now_ts - window,
+                    end_time=now_ts,
+                    timeline_id=timeline_id,
                 )
 
                 return convert_resp(data={
@@ -539,8 +561,12 @@ async def generate_with_custom_prompts(
                 prompt_manager.prompts["generation"]["todo_extraction"] = custom_prompts["generation.todo_extraction"]
 
             try:
+                now_ts = int(datetime.now().timestamp())
+                window = (lookback_minutes or 30) * 60
                 todo_id = opencontext.consumption_manager._smart_todo_manager.generate_todo_tasks(
-                    lookback_minutes=lookback_minutes or 30
+                    start_time=now_ts - window,
+                    end_time=now_ts,
+                    timeline_id=timeline_id,
                 )
 
                 return convert_resp(data={
@@ -574,7 +600,9 @@ async def generate_with_custom_prompts(
 
             try:
                 report_content = await opencontext.consumption_manager._activity_generator.generate_report(
-                    start_time, end_time
+                    start_time,
+                    end_time,
+                    timeline_id=timeline_id,
                 )
 
                 if report_content and len(report_content.strip()) > 50:
@@ -605,8 +633,12 @@ async def generate_with_custom_prompts(
                 prompt_manager.prompts["generation"]["realtime_activity_monitor"] = custom_prompts["generation.realtime_activity_monitor"]
 
             try:
+                now_ts = int(datetime.now().timestamp())
+                window = (lookback_minutes or 15) * 60
                 activity_result = opencontext.consumption_manager._real_activity_monitor.generate_realtime_activity_summary(
-                    minutes=lookback_minutes or 15
+                    start_time=now_ts - window,
+                    end_time=now_ts,
+                    timeline_id=timeline_id,
                 )
                 logger.info(f"activity_result: {activity_result}")
                 if activity_result:

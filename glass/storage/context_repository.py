@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import sqlite3
 from contextlib import contextmanager
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 from opencontext.storage.base_storage import StorageType
 from opencontext.storage.global_storage import get_global_storage
 from opencontext.storage.unified_storage import UnifiedStorage
 from opencontext.utils.logging_utils import get_logger
 
-from .models import MultimodalContextItem
+from .models import Modality, MultimodalContextItem
 
 logger = get_logger(__name__)
 
@@ -58,6 +58,9 @@ class GlassContextRepository:
 
         records = []
         for item, context_id in zip(items, upserted_ids):
+            context_type = None
+            if item.context and item.context.extracted_data:
+                context_type = item.context.extracted_data.context_type.value
             records.append(
                 {
                     "timeline_id": item.timeline_id,
@@ -65,6 +68,7 @@ class GlassContextRepository:
                     "modality": item.modality.value,
                     "content_ref": item.content_ref,
                     "embedding_ready": 1 if item.embedding_ready else 0,
+                    "context_type": context_type,
                 }
             )
 
@@ -77,6 +81,7 @@ class GlassContextRepository:
                     modality,
                     content_ref,
                     embedding_ready,
+                    context_type,
                     created_at,
                     updated_at
                 )
@@ -86,6 +91,7 @@ class GlassContextRepository:
                     :modality,
                     :content_ref,
                     :embedding_ready,
+                    :context_type,
                     CURRENT_TIMESTAMP,
                     CURRENT_TIMESTAMP
                 )
@@ -94,6 +100,7 @@ class GlassContextRepository:
                     modality = excluded.modality,
                     content_ref = excluded.content_ref,
                     embedding_ready = excluded.embedding_ready,
+                    context_type = excluded.context_type,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 records,
@@ -106,7 +113,7 @@ class GlassContextRepository:
         with self._transaction(readonly=True) as cursor:
             cursor.execute(
                 """
-                SELECT timeline_id, context_id, modality, content_ref, embedding_ready
+                SELECT timeline_id, context_id, modality, content_ref, embedding_ready, context_type
                 FROM glass_multimodal_context
                 WHERE timeline_id = ?
                 ORDER BY context_id
@@ -114,6 +121,80 @@ class GlassContextRepository:
                 (timeline_id,),
             )
             return cursor.fetchall()
+
+    def load_envelope(
+        self,
+        timeline_id: str,
+        *,
+        modalities: Sequence[Modality] | None = None,
+    ):
+        """
+        Load a ContextEnvelope for the specified timeline.
+
+        Returns None when no multimodal items are recorded or when the underlying
+        ProcessedContext records cannot be reconstructed.
+        """
+        rows = self.fetch_by_timeline(timeline_id)
+        if not rows:
+            return None
+
+        allowed_modalities = {modality for modality in modalities} if modalities else None
+        items: List[MultimodalContextItem] = []
+        for row in rows:
+            try:
+                modality = Modality(row["modality"])
+            except ValueError:
+                logger.debug(
+                    "Skipping multimodal row with unsupported modality '%s' for timeline %s",
+                    row["modality"],
+                    timeline_id,
+                )
+                continue
+
+            if allowed_modalities and modality not in allowed_modalities:
+                continue
+
+            context_type = row["context_type"]
+            if not context_type:
+                logger.debug(
+                    "Multimodal row %s for timeline %s missing context_type metadata",
+                    row["context_id"],
+                    timeline_id,
+                )
+                continue
+
+            context = self._storage.get_processed_context(row["context_id"], context_type)
+            if not context:
+                logger.debug(
+                    "Processed context %s (%s) not found for timeline %s",
+                    row["context_id"],
+                    context_type,
+                    timeline_id,
+                )
+                continue
+
+            item = MultimodalContextItem(
+                context=context,
+                timeline_id=timeline_id,
+                modality=modality,
+                content_ref=row["content_ref"],
+                embedding_ready=bool(row["embedding_ready"]),
+            )
+            items.append(item)
+
+        if not items:
+            return None
+
+        items.sort(key=_sort_envelope_item, reverse=True)
+        source = _resolve_source_from_items(items) or timeline_id
+
+        from glass.processing.envelope import ContextEnvelope  # local import to avoid cycle
+
+        return ContextEnvelope.from_items(
+            timeline_id=timeline_id,
+            source=source,
+            items=items,
+        )
 
     def _resolve_storage(self) -> UnifiedStorage:
         storage = get_global_storage().get_storage()
@@ -148,3 +229,28 @@ class GlassContextRepository:
             raise
         finally:
             cursor.close()
+
+
+def _sort_envelope_item(item: MultimodalContextItem) -> Tuple[float, float]:
+    """
+    Sort envelope items by segment_end (fallback to segment_start) and creation time.
+
+    Returns a tuple so that Python can compare consistently even when metadata is missing.
+    """
+    metadata = item.context.metadata or {}
+    segment_end = metadata.get("segment_end")
+    segment_start = metadata.get("segment_start")
+
+    end_val = float(segment_end) if segment_end is not None else float(segment_start or 0.0)
+    create_time = item.context.properties.create_time
+    create_ts = create_time.timestamp() if create_time else 0.0
+    return end_val, create_ts
+
+
+def _resolve_source_from_items(items: Sequence[MultimodalContextItem]) -> Optional[str]:
+    for item in items:
+        metadata = item.context.metadata or {}
+        source = metadata.get("source_video")
+        if source:
+            return str(source)
+    return None

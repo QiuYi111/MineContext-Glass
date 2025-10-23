@@ -343,7 +343,7 @@ class ConsumptionManager:
         self._statistics["total_contexts_consumed"] = 0
         self._statistics["errors"] = 0
     
-    def generate_report(self, start_time: int, end_time: int) -> str:
+    def generate_report(self, start_time: int, end_time: int, *, timeline_id: Optional[str] = None) -> str:
         """Generate activity report
         
         Args:
@@ -358,7 +358,15 @@ class ConsumptionManager:
             return ""
         
         try:
-            report = self._activity_generator.generate_report(start_time, end_time)
+            report_task = self._activity_generator.generate_report(
+                start_time,
+                end_time,
+                timeline_id=timeline_id,
+            )
+            if asyncio.iscoroutine(report_task):
+                report = self._await_coroutine(report_task)
+            else:
+                report = report_task
             
             # Update statistics
             self._statistics["total_queries"] += 1
@@ -368,3 +376,18 @@ class ConsumptionManager:
             self._statistics["errors"] += 1
             logger.exception(f"Error occurred while generating activity report: {e}")
             return ""
+
+    def _await_coroutine(self, coro):
+        """Synchronously await a coroutine while handling loop state."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            raise RuntimeError("Cannot synchronously wait for coroutine inside a running event loop")
+
+        if loop:
+            return loop.run_until_complete(coro)
+
+        return asyncio.run(coro)
