@@ -59,7 +59,7 @@ class SQLiteBackend(IDocumentStorageBackend):
     def _create_tables(self):
         """Create database table structure"""
         cursor = self.connection.cursor()
-        
+
         # vaults table - reports
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS vaults (
@@ -137,6 +137,9 @@ class SQLiteBackend(IDocumentStorageBackend):
             )
         ''')
 
+        # Glass multimodal context table
+        self._create_glass_tables(cursor)
+
         # New table indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_vaults_created ON vaults (created_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_vaults_type ON vaults (document_type)')
@@ -148,11 +151,61 @@ class SQLiteBackend(IDocumentStorageBackend):
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_activity_time ON activity (start_time, end_time)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_tips_time ON tips (created_at)')
         
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_glass_multimodal_timeline ON glass_multimodal_context (timeline_id)'
+        )
+        cursor.execute(
+            'CREATE INDEX IF NOT EXISTS idx_glass_multimodal_context_id ON glass_multimodal_context (context_id)'
+        )
+
         self.connection.commit()
         
         # Add default Quick Start document (only on first initialization)
         self._insert_default_vault_document()
-    
+
+    def _create_glass_tables(self, cursor: sqlite3.Cursor) -> None:
+        """Ensure Glass specific tables exist without breaking existing deployments."""
+        cursor.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS glass_multimodal_context (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timeline_id TEXT NOT NULL,
+                context_id TEXT NOT NULL,
+                modality TEXT NOT NULL,
+                content_ref TEXT NOT NULL,
+                embedding_ready BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(context_id)
+            )
+            '''
+        )
+
+        cursor.execute('PRAGMA table_info(glass_multimodal_context)')
+        columns = [column[1] for column in cursor.fetchall()]
+
+        if 'embedding_ready' not in columns:
+            cursor.execute(
+                '''
+                ALTER TABLE glass_multimodal_context
+                ADD COLUMN embedding_ready BOOLEAN DEFAULT 0
+                '''
+            )
+        if 'created_at' not in columns:
+            cursor.execute(
+                '''
+                ALTER TABLE glass_multimodal_context
+                ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                '''
+            )
+        if 'updated_at' not in columns:
+            cursor.execute(
+                '''
+                ALTER TABLE glass_multimodal_context
+                ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                '''
+            )
+
     def _insert_default_vault_document(self):
         """Insert default Quick Start document"""
         cursor = self.connection.cursor()
@@ -179,8 +232,8 @@ class SQLiteBackend(IDocumentStorageBackend):
 
         # Insert default document
         try:
-            cursor.execute('''
-                INSERT INTO vaults (title, summary, content, document_type, tags, is_folder, is_deleted)
+        cursor.execute('''
+            INSERT INTO vaults (title, summary, content, document_type, tags, is_folder, is_deleted)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
                 'Start With Tutorial',

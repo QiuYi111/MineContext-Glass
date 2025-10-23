@@ -78,10 +78,16 @@
 - 单元与集成测试位于 `glass/tests/ingestion/`，其中 `test_local_video_manager_integration.py` 使用仓库示例视频验证真实路径。
 
 ### Phase 2：数据层扩展
-1. 复用 MineContext 的上下文实体，新增 `MultimodalContextItem`，包含 `timeline_id`, `modality`, `content_ref`, `embedding_ready`.
-2. 增量迁移脚本，确保旧 schema 无需改动即可加载新实体（只新增表/列）。
-3. 写 `glass/storage/context_repository.py`，提供 `upsert_aligned_segments()`。
-4. 单元测试覆盖插入、查询、回滚。
+**状态：✅ 已完成（2025-10-24）**
+
+**开发记录**
+- 在 `glass/storage/models.py` 定义 `Modality` 与 `MultimodalContextItem`，以 `ProcessedContext` 为核心消除额外 DTO。
+- 更新 `opencontext/storage/backends/sqlite_backend.py`，追加 `glass_multimodal_context` 表及索引，纯新增列保持向后兼容。
+- 新建 `glass/storage/context_repository.py`，封装向量双写与 SQLite 事务，`upsert_aligned_segments()` 保证一次提交。
+- 编写 `glass/tests/storage/test_context_repository.py`，覆盖插入、幂等更新与异常回滚。
+
+**验证**
+- `uv run pytest glass/tests/storage -q`
 
 ### Phase 3：处理层适配
 1. 在 `opencontext` 的处理管线中新增 Glass 路由：若输入包含 `timeline_id`，转入 `glass.processing`.
