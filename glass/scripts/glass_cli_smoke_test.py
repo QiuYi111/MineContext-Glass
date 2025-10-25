@@ -1,34 +1,27 @@
 from __future__ import annotations
 
 """
-Command-line smoke test for the Glass pipeline.
+Full pipeline regression test for the Glass timeline processor.
 
-This script stitches together the ingestion pipeline, Glass processors, storage,
-and the CLI report generation command using the sample video located in the
-`videos/` directory. Heavy runtime dependencies (ffmpeg, WhisperX, remote LLMs)
-are replaced with lightweight stubs so the end-to-end flow can be validated in
-restricted environments.
+This script runs the entire ingestion + processing + report workflow against
+the tracked video in `videos/25-10/6-22.mp4`. Unlike the original smoke test it
+relies on the real ffmpeg tooling, the Glass storage path, and the Doubao AUC
+Turbo (火山极速识别) speech service instead of WhisperX stubs.
 
 Usage (run from repository root):
 
-    uv run python glass/scripts/glass_cli_smoke_test.py
+    uv run python glass/scripts/glass_cli_smoke_test.py --auc-app-key xxx --auc-access-key yyy
 
-The script will:
-1. Prepare an isolated `CONTEXT_PATH` workspace under `persist/glass_cli_smoke/`.
-2. Stub embedding/vectorization and report generation to avoid network calls.
-3. Stub ffmpeg/whisper workloads to emit deterministic frames and transcript
-   segments without external binaries.
-4. Ingest `videos/22-10/Video Playback.mp4`, run the Glass timeline processor,
-   and persist multimodal contexts.
-5. Invoke `opencontext glass report` via the CLI and write the resulting report
-   to the smoke workspace.
+Expectations:
+1. An isolated `CONTEXT_PATH` workspace is created under `persist/glass_cli_smoke/`.
+2. ffmpeg extracts frames/audio from the sample video.
+3. Audio is transcribed through AUC Turbo, producing alignment segments.
+4. The Glass timeline processor writes multimedia contexts to storage.
+5. `opencontext glass report` generates a report scoped to the ingested timeline.
 """
 
 import argparse
-import hashlib
-import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -39,158 +32,82 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from opencontext.config.global_config import GlobalConfig
-from opencontext.llm import global_embedding_client, global_vlm_client
 from opencontext.managers.processor_manager import ContextProcessorManager
-from opencontext.models.context import RawContextProperties, Vectorize
+from opencontext.models.context import RawContextProperties
 from opencontext.models.enums import ContentFormat, ContextSource
-from opencontext.storage.backends import chromadb_backend
 from opencontext.storage.global_storage import GlobalStorage
 
-from glass.ingestion import (
-    AlignmentSegment,
-    LocalVideoManager,
-    SegmentType,
-    TranscriptionResult,
-)
-from glass.ingestion.ffmpeg_runner import (
-    AudioExtractionResult,
-    FrameExtractionResult,
-)
+from glass.ingestion import AUCTurboConfig, AUCTurboRunner, FFmpegRunner, LocalVideoManager
 from glass.processing.chunkers import ManifestChunker
 from glass.processing.timeline_processor import GlassTimelineProcessor
+from glass.processing.visual_encoder import VisualEncoder
 from glass.storage.context_repository import GlassContextRepository
 
 
-def _hash_to_vector(payload: str | None) -> list[float]:
-    """Create a deterministic pseudo-vector from arbitrary input."""
-    basis = (payload or "glass-smoke").encode("utf-8", errors="ignore")
-    digest = hashlib.sha256(basis).digest()
-    vector: list[float] = []
-    for index in range(0, 12, 4):
-        chunk = int.from_bytes(digest[index : index + 4], "little")
-        vector.append(chunk / 2**32)
-    return vector
+def _coalesce_numeric_cli_env(
+    cli_value: float | None,
+    env_name: str,
+    default: float,
+) -> float:
+    """Pick the CLI value, fall back to env var, then default."""
+    if cli_value is not None:
+        return cli_value
+    env_value = os.getenv(env_name)
+    if env_value is None:
+        return default
+    try:
+        return float(env_value)
+    except ValueError as exc:  # noqa: B904 - want context
+        raise ValueError(f"Environment variable {env_name} must be numeric") from exc
 
 
-def _install_vectorization_stubs() -> None:
-    """Replace heavy embedding + LLM clients with lightweight fallbacks."""
-
-    def _vectorize_stub(vectorize: Vectorize, **_: object) -> list[float]:
-        if vectorize.vector:
-            return vectorize.vector
-        content = vectorize.get_vectorize_content() or vectorize.image_path or ""
-        vectorize.vector = _hash_to_vector(str(content))
-        return vectorize.vector
-
-    async def _generate_stub(messages: list, **_: object) -> str:
-        """Produce a deterministic markdown report from prompt payload."""
-        timeline = os.getenv("GLASS_SMOKE_TIMELINE", "unknown")
-        user_payload = next((msg.get("content", "") for msg in messages if msg.get("role") == "user"), "")
-
-        range_match = re.search(r"检索范围：(\d+)\s*到\s*(\d+)", user_payload)
-        start_ts, end_ts = (range_match.groups() if range_match else ("unknown", "unknown"))
-
-        contexts_block = ""
-        marker = "上下文信息："
-        if marker in user_payload:
-            start_idx = user_payload.index(marker) + len(marker)
-            end_marker = "\n\n特别注意："
-            end_idx = user_payload.find(end_marker, start_idx)
-            if end_idx == -1:
-                end_idx = len(user_payload)
-            contexts_block = user_payload[start_idx:end_idx].strip()
-
-        try:
-            contexts: list[str] = json.loads(contexts_block) if contexts_block else []
-        except json.JSONDecodeError:
-            contexts = []
-
-        lines: list[str] = [
-            "# Glass Timeline Smoke Report",
-            f"- timeline: {timeline}",
-            f"- window: {start_ts} → {end_ts}",
-            f"- context items: {len(contexts)}",
-            "",
-        ]
-        for index, context_str in enumerate(contexts[:8], start=1):
-            snippet = (context_str or "").splitlines()[0].strip()
-            lines.append(f"{index}. {snippet or 'context snippet unavailable'}")
-        if len(contexts) > 8:
-            lines.append(f"... {len(contexts) - 8} more segments omitted")
-        return "\n".join(lines)
-
-    # Skip eager encoder usage; downstream storage will populate vectors.
-    global_embedding_client.is_initialized = lambda: False  # type: ignore[assignment]
-    global_embedding_client.do_vectorize = _vectorize_stub  # type: ignore[assignment]
-    chromadb_backend.do_vectorize = _vectorize_stub  # type: ignore[assignment]
-    global_vlm_client.generate_with_messages_async = _generate_stub  # type: ignore[assignment]
+def _resolve_video_path(repo_root: Path, override: str | None) -> Path:
+    """Return the sample video path, optionally overridden by CLI."""
+    if override:
+        candidate = Path(override).expanduser()
+    else:
+        candidate = repo_root / "videos" / "25-10" / "6-22.mp4"
+    candidate = candidate.resolve()
+    if not candidate.exists():
+        raise FileNotFoundError(f"Sample video missing: {candidate}")
+    return candidate
 
 
-class _StubFFmpegRunner:
-    """Produce deterministic frame/audio artefacts without invoking ffmpeg."""
-
-    def __init__(self, *, frame_count: int = 6) -> None:
-        self._frame_count = max(frame_count, 1)
-
-    def extract_frames(
-        self,
-        video_path: Path,
-        *,
-        fps: float,
-        output_dir: Path,
-        image_pattern: str = "frame_%05d.png",
-    ) -> FrameExtractionResult:
-        del video_path, fps  # Unused in stub
-        output_dir.mkdir(parents=True, exist_ok=True)
-        frame_paths: list[Path] = []
-        for index in range(self._frame_count):
-            frame_path = output_dir / image_pattern.replace("%05d", f"{index:05d}")
-            frame_path.write_text(f"stub-frame-{index}", encoding="utf-8")
-            frame_paths.append(frame_path)
-        return FrameExtractionResult(frames_dir=output_dir, frame_paths=frame_paths)
-
-    def extract_audio(self, video_path: Path, *, output_path: Path) -> AudioExtractionResult:
-        del video_path  # Unused
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(b"stub-audio")
-        return AudioExtractionResult(audio_path=output_path)
-
-
-class _StubWhisperXRunner:
-    """Emit canned transcript segments instead of running WhisperX."""
-
-    def __init__(self, *, segment_count: int = 3) -> None:
-        self._segment_count = max(segment_count, 1)
-
-    def transcribe(self, audio_path: Path, *, timeline_id: str) -> TranscriptionResult:
-        if not audio_path.exists():
-            raise FileNotFoundError(f"audio stub missing: {audio_path}")
-        segments: list[AlignmentSegment] = []
-        for index in range(self._segment_count):
-            start = float(index * 8)
-            end = start + 4.0
-            text = f"Stub transcript line {index + 1} recorded on timeline {timeline_id}"
-            segments.append(
-                AlignmentSegment(start=start, end=end, type=SegmentType.AUDIO, payload=text)
-            )
-        raw_response = {
-            "segments": [
-                {"start": seg.start, "end": seg.end, "text": seg.payload} for seg in segments
-            ]
-        }
-        return TranscriptionResult(segments=segments, raw_response=raw_response)
-
-
-class _StubVisualEncoder:
-    """Provide deterministic image vectors without hitting external services."""
-
-    def encode(self, image_path: str) -> Vectorize:
-        vector = _hash_to_vector(image_path)
-        return Vectorize(
-            content_format=ContentFormat.IMAGE,
-            image_path=image_path,
-            vector=vector,
+def _build_auc_runner(args: argparse.Namespace) -> AUCTurboRunner:
+    """Instantiate an AUC Turbo runner from CLI/env configuration."""
+    base = AUCTurboConfig()
+    app_key = args.auc_app_key or os.getenv("AUC_APP_KEY")
+    access_key = args.auc_access_key or os.getenv("AUC_ACCESS_KEY")
+    if not app_key or not access_key:
+        raise RuntimeError(
+            "AUC Turbo credentials missing. Provide --auc-app-key/--auc-access-key "
+            "or set AUC_APP_KEY/AUC_ACCESS_KEY."
         )
+
+    config = AUCTurboConfig(
+        base_url=args.auc_base_url or os.getenv("AUC_BASE_URL") or base.base_url,
+        resource_id=args.auc_resource_id or os.getenv("AUC_RESOURCE_ID") or base.resource_id,
+        app_key=app_key,
+        access_key=access_key,
+        model_name=args.auc_model_name or os.getenv("AUC_MODEL_NAME") or base.model_name,
+        request_timeout=_coalesce_numeric_cli_env(
+            args.auc_timeout,
+            "AUC_REQUEST_TIMEOUT",
+            base.request_timeout,
+        ),
+        max_file_size_mb=_coalesce_numeric_cli_env(
+            args.auc_max_size_mb,
+            "AUC_MAX_FILE_SIZE_MB",
+            base.max_file_size_mb,
+        ),
+        max_duration_sec=_coalesce_numeric_cli_env(
+            args.auc_max_duration_sec,
+            "AUC_MAX_DURATION_SEC",
+            base.max_duration_sec,
+        ),
+        endpoint_path=args.auc_endpoint or os.getenv("AUC_ENDPOINT_PATH") or base.endpoint_path,
+    )
+    return AUCTurboRunner(config=config)
 
 
 def _prepare_workspace(repo_root: Path, *, override: str | None = None) -> Path:
@@ -225,7 +142,7 @@ def _build_processor_stack(repository: GlassContextRepository) -> ContextProcess
     processor = GlassTimelineProcessor(
         repository=repository,
         chunker=ManifestChunker(),
-        visual_encoder=_StubVisualEncoder(),
+        visual_encoder=VisualEncoder(),
     )
     processor_manager.register_processor(processor)
     return processor_manager
@@ -287,26 +204,26 @@ def run_smoke_test(args: argparse.Namespace) -> Path:
     """Execute the end-to-end smoke workflow and return the report path."""
     repo_root = Path(__file__).resolve().parents[2]
     run_dir = _prepare_workspace(repo_root, override=args.run_id)
-    _install_vectorization_stubs()
     _initialize_singletons(repo_root / "config" / "config.yaml")
 
     repository = GlassContextRepository()
     processor_manager = _build_processor_stack(repository)
 
-    ffmpeg_stub = _StubFFmpegRunner(frame_count=args.frame_count)
-    whisper_stub = _StubWhisperXRunner(segment_count=args.segment_count)
+    ffmpeg_runner = FFmpegRunner(ffmpeg_executable=args.ffmpeg_bin)
+    speech_runner = _build_auc_runner(args)
     ingestion_dir = run_dir / "ingestion"
     video_manager = LocalVideoManager(
         base_dir=ingestion_dir,
         frame_rate=args.frame_rate,
-        ffmpeg_runner=ffmpeg_stub,
-        speech_runner=whisper_stub,
+        ffmpeg_runner=ffmpeg_runner,
+        speech_runner=speech_runner,
     )
 
+    sample_video = _resolve_video_path(repo_root, args.video_path)
     timeline_id = args.timeline_id or f"smoke-{int(time.time())}"
     manifest_json = _ingest_sample_video(
         video_manager,
-        repo_root / "videos" / "22-10" / "Video Playback.mp4",
+        sample_video,
         timeline_id=timeline_id,
     )
 
@@ -354,28 +271,63 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="Optional run directory name under persist/glass_cli_smoke/.",
     )
     parser.add_argument(
-        "--frame-count",
-        type=int,
-        default=6,
-        help="Number of synthetic frames generated by the ffmpeg stub.",
-    )
-    parser.add_argument(
-        "--segment-count",
-        type=int,
-        default=3,
-        help="Number of synthetic transcript segments produced by the whisper stub.",
-    )
-    parser.add_argument(
         "--frame-rate",
         type=float,
         default=1.0,
-        help="Frame sampling rate used by the ingestion stub.",
+        help="Frame sampling rate used while extracting frames via ffmpeg.",
     )
     parser.add_argument(
         "--lookback-minutes",
         type=int,
         default=120,
         help="Lookback window passed to the CLI report command.",
+    )
+    parser.add_argument(
+        "--video-path",
+        help="Override the default videos/25-10/6-22.mp4 sample with a custom path.",
+    )
+    parser.add_argument(
+        "--ffmpeg-bin",
+        help="Explicit path to ffmpeg; defaults to resolving ffmpeg from PATH.",
+    )
+    parser.add_argument(
+        "--auc-app-key",
+        help="AUC Turbo App Key. Defaults to environment variable AUC_APP_KEY.",
+    )
+    parser.add_argument(
+        "--auc-access-key",
+        help="AUC Turbo Access Key. Defaults to environment variable AUC_ACCESS_KEY.",
+    )
+    parser.add_argument(
+        "--auc-base-url",
+        help="Override the AUC Turbo base URL.",
+    )
+    parser.add_argument(
+        "--auc-resource-id",
+        help="Override the AUC Turbo resource id (default volc.bigasr.auc_turbo).",
+    )
+    parser.add_argument(
+        "--auc-model-name",
+        help="Override the AUC Turbo model name (default bigmodel).",
+    )
+    parser.add_argument(
+        "--auc-timeout",
+        type=float,
+        help="HTTP timeout for AUC Turbo requests (seconds).",
+    )
+    parser.add_argument(
+        "--auc-max-size-mb",
+        type=float,
+        help="Reject audio files above this size before calling AUC Turbo.",
+    )
+    parser.add_argument(
+        "--auc-max-duration-sec",
+        type=float,
+        help="Reject audio files above this duration before calling AUC Turbo.",
+    )
+    parser.add_argument(
+        "--auc-endpoint",
+        help="Custom endpoint path appended to the base URL.",
     )
     return parser
 
