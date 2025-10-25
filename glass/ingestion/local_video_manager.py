@@ -11,7 +11,8 @@ from loguru import logger
 from .ffmpeg_runner import FFmpegRunner
 from .models import AlignmentManifest, AlignmentSegment, IngestionStatus, SegmentType
 from .video_manager import TimelineNotFoundError, VideoManager
-from .whisperx_runner import TranscriptionResult, WhisperXRunner
+from .speech_to_text import SpeechToTextRunner, TranscriptionResult
+from .whisperx_runner import WhisperXRunner
 
 
 class LocalVideoManager(VideoManager):
@@ -32,7 +33,7 @@ class LocalVideoManager(VideoManager):
         *,
         base_dir: Path | None = None,
         ffmpeg_runner: FFmpegRunner | None = None,
-        whisper_runner: WhisperXRunner | None = None,
+        speech_runner: SpeechToTextRunner | None = None,
         frame_rate: float = 1.0,
     ) -> None:
         if frame_rate <= 0:
@@ -40,7 +41,7 @@ class LocalVideoManager(VideoManager):
 
         self._base_dir = (base_dir or Path("persist") / "glass").resolve()
         self._ffmpeg = ffmpeg_runner or FFmpegRunner()
-        self._whisper = whisper_runner or WhisperXRunner()
+        self._speech = speech_runner or WhisperXRunner()
         self._frame_rate = frame_rate
 
         self._base_dir.mkdir(parents=True, exist_ok=True)
@@ -81,7 +82,7 @@ class LocalVideoManager(VideoManager):
                 output_path=audio_path,
             )
 
-            transcription = self._whisper.transcribe(audio_result.audio_path, timeline_id=timeline)
+            transcription = self._speech.transcribe(audio_result.audio_path, timeline_id=timeline)
 
             manifest = self._build_manifest(
                 timeline_id=timeline,

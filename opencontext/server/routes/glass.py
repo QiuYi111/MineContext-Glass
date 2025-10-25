@@ -11,7 +11,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
-from glass.ingestion import IngestionStatus, LocalVideoManager, TimelineNotFoundError
+from glass.ingestion import (
+    IngestionStatus,
+    LocalVideoManager,
+    TimelineNotFoundError,
+    build_speech_to_text_runner_from_config,
+)
 from glass.ingestion.service import GlassIngestionService
 from glass.storage.context_repository import GlassContextRepository
 from opencontext.server.opencontext import OpenContext
@@ -23,7 +28,9 @@ router = APIRouter(prefix="/glass", tags=["glass"])
 def _get_ingestion_service(request: Request, context_lab: OpenContext = Depends(get_context_lab)) -> GlassIngestionService:
     service = getattr(request.app.state, "glass_ingestion_service", None)
     if service is None:
-        service = GlassIngestionService(LocalVideoManager(), context_lab.processor_manager)
+        speech_runner = build_speech_to_text_runner_from_config()
+        manager = LocalVideoManager(speech_runner=speech_runner)
+        service = GlassIngestionService(manager, context_lab.processor_manager)
         setattr(request.app.state, "glass_ingestion_service", service)
     return service
 

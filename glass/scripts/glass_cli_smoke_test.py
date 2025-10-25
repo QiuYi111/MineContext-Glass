@@ -300,7 +300,7 @@ def run_smoke_test(args: argparse.Namespace) -> Path:
         base_dir=ingestion_dir,
         frame_rate=args.frame_rate,
         ffmpeg_runner=ffmpeg_stub,
-        whisper_runner=whisper_stub,
+        speech_runner=whisper_stub,
     )
 
     timeline_id = args.timeline_id or f"smoke-{int(time.time())}"

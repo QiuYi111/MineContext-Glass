@@ -267,14 +267,6 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         logger.error(f"No supported video files found under {video_dir} (extensions: {extensions})")
         return 1
 
-    frame_root = args.output_dir.expanduser().resolve()
-    day_folder_name = video_dir.name
-    day_output_dir = vlog_ingest.prepare_output_root(
-        frame_root,
-        day_folder_name,
-        clean=(not args.no_clean and not args.skip_extract),
-    )
-
     day_start = dt.datetime.combine(date_val, dt.time.min)
     if local_tz:
         day_start = day_start.replace(tzinfo=local_tz)
@@ -337,6 +329,14 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         if args.skip_ingest:
             logger.info("Skipping frame ingestion; assuming frames already ingested.")
         else:
+            frame_root = args.output_dir.expanduser().resolve()
+            day_folder_name = video_dir.name
+            day_output_dir = vlog_ingest.prepare_output_root(
+                frame_root,
+                day_folder_name,
+                clean=(not args.no_clean and not args.skip_extract),
+            )
+
             logger.info(f"Starting frame extraction for {date_val.isoformat()}")
             records = vlog_ingest.collect_frames(
                 videos=videos,

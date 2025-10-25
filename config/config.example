@@ -189,6 +189,19 @@ api_auth:
 prompts:
   language: "zh"
 
+# Glass ingestion configuration
+glass:
+  speech_to_text:
+    provider: whisperx  # whisperx | auc_turbo
+    auc_turbo:
+      base_url: https://openspeech.bytedance.com/api/v3
+      resource_id: volc.bigasr.auc_turbo
+      app_key: "${AUC_APP_KEY:}"
+      access_key: "${AUC_ACCESS_KEY:}"
+      request_timeout: 120
+      max_file_size_mb: 100
+      max_duration_sec: 7200
+
 # Content generation service configuration
 content_generation:
   enabled: true

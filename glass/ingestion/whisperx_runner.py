@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
@@ -9,15 +8,10 @@ import whisperx
 from loguru import logger
 
 from .models import AlignmentSegment, SegmentType
+from .speech_to_text import SpeechToTextRunner, TranscriptionResult
 
 
-@dataclass(frozen=True)
-class TranscriptionResult:
-    segments: list[AlignmentSegment]
-    raw_response: dict[str, Any]
-
-
-class WhisperXRunner:
+class WhisperXRunner(SpeechToTextRunner):
     """
     Encapsulates WhisperX transcription and alignment behavior.
 
