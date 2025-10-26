@@ -6,7 +6,7 @@ Full pipeline regression test for the Glass timeline processor.
 This script runs the entire ingestion + processing + report workflow against
 the tracked video in `videos/25-10/6-22.mp4`. Unlike the original smoke test it
 relies on the real ffmpeg tooling, the Glass storage path, and the Doubao AUC
-Turbo (火山极速识别) speech service instead of WhisperX stubs.
+Turbo (火山极速识别) speech service.
 
 Usage (run from repository root):
 
@@ -73,11 +73,23 @@ def _resolve_video_path(repo_root: Path, override: str | None) -> Path:
     return candidate
 
 
+def _load_auc_config_from_global() -> AUCTurboConfig:
+    """Load the AUC Turbo config from GlobalConfig, falling back to defaults."""
+    try:
+        global_config = GlobalConfig.get_instance()
+        glass_config = global_config.get_config("glass") or {}
+        speech_config = glass_config.get("speech_to_text") or {}
+        auc_config = speech_config.get("auc_turbo")
+        return AUCTurboConfig.from_dict(auc_config)
+    except Exception:
+        return AUCTurboConfig()
+
+
 def _build_auc_runner(args: argparse.Namespace) -> AUCTurboRunner:
     """Instantiate an AUC Turbo runner from CLI/env configuration."""
-    base = AUCTurboConfig()
-    app_key = args.auc_app_key or os.getenv("AUC_APP_KEY")
-    access_key = args.auc_access_key or os.getenv("AUC_ACCESS_KEY")
+    base = _load_auc_config_from_global()
+    app_key = args.auc_app_key or os.getenv("AUC_APP_KEY") or base.app_key
+    access_key = args.auc_access_key or os.getenv("AUC_ACCESS_KEY") or base.access_key
     if not app_key or not access_key:
         raise RuntimeError(
             "AUC Turbo credentials missing. Provide --auc-app-key/--auc-access-key "

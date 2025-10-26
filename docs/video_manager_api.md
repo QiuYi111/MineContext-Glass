@@ -22,11 +22,12 @@ class VideoManager(ABC):
 路径：`glass/ingestion/local_video_manager.py`
 
 ```python
+speech_runner = AUCTurboRunner(AUCTurboConfig(app_key="...", access_key="..."))
 manager = LocalVideoManager(
     base_dir=Path("persist/glass"),
     frame_rate=1.0,
     ffmpeg_runner=FFmpegRunner(),
-    whisper_runner=WhisperXRunner(),
+    speech_runner=speech_runner,
 )
 manifest = manager.ingest("videos/sample.mp4")
 ```
@@ -41,7 +42,7 @@ manifest = manager.ingest("videos/sample.mp4")
 
 ### 错误处理
 - 输入文件不存在 → `FileNotFoundError`
-- WhisperX / ffmpeg 异常 → 捕获并将状态写为 `failed`，然后重新抛出原始异常。
+- 火山极速识别 / ffmpeg 异常 → 捕获并将状态写为 `failed`，然后重新抛出原始异常。
 - 读取未知时间线 → `TimelineNotFoundError`
 
 ## 数据模型
@@ -79,15 +80,12 @@ class AlignmentManifest(BaseModel):
   - `cleanup(paths)`
 - 默认使用系统 `ffmpeg`；可通过构造参数覆盖。
 
-### `WhisperXRunner`
-- 入口：`glass/ingestion/whisperx_runner.py`
-- 构造参数：
-  - `model_size`（默认 `tiny`）
-  - `device`（默认自动检测 CUDA，否则 CPU）
-  - `compute_type`（CUDA → `float16`，CPU → `int8`）
+### `AUCTurboRunner`
+- 入口：`glass/ingestion/auc_runner.py`
+- 配置：`AUCTurboConfig`（`base_url`、`resource_id`、`app_key`、`access_key`、`model_name` 等）。
 - 方法：
-  - `transcribe(audio_path, timeline_id=...)` 返回 `TranscriptionResult`
-  - `build_segments(whisper_output)` 将原生 WhisperX 输出转为 `AlignmentSegment`
+  - `transcribe(audio_path, timeline_id=...)`：将音频发送到火山极速识别并返回 `TranscriptionResult`。
+  - 错误时抛出 `AUCTurboError`，并带上 `request_id` 方便定位问题。
 
 ## 典型工作流
 1. 通过 `LocalVideoManager.ingest()` 处理原始视频。

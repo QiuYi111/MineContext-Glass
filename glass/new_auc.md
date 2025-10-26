@@ -1,10 +1,10 @@
 # 火山极速识别（AUC Turbo）接入说明
 
-本接口用于 MineContext Glass 在本地算力不足或 WhisperX 推理耗时过长时的云端替代方案。整体目标是保持 `AlignmentManifest → AlignmentSegment` 的数据契约不变，只替换语音识别的实现，从而不破坏现有管线。
+本接口是 MineContext Glass 默认的语音识别实现。整体目标是保持 `AlignmentManifest → AlignmentSegment` 的数据契约不变，只替换语音识别的实现，从而不破坏现有管线。
 
 ## 1. 使用限制与前置条件
 
-- **音频长度**：≤2 小时；更长文件请切回录音文件标准版或本地 WhisperX。
+- **音频长度**：≤2 小时；更长文件请在上传前切分音频。
 - **文件大小**：≤100 MB，推荐 ≤20 MB（受出口带宽影响）。
 - **格式**：PCM / WAV / MP3 / OGG OPUS。建议 ffmpeg 统一导出 16 kHz、单声道 WAV 以减小体积。
 - **多声道**：解码耗时随声道数上升，若无法转单声道需预估延迟。
@@ -13,8 +13,8 @@
 
 ## 2. 架构整合策略
 
-1. 将现有 `WhisperXRunner` 抽象为通用 `SpeechToTextRunner` 协议，`LocalVideoManager` 仅依赖该协议，避免散落的 if/else。
-2. 新增 `AUCTurboRunner`：
+1. 将 `SpeechToTextRunner` 抽象固化，`LocalVideoManager` 仅依赖该协议，避免散落的 if/else。
+2. 由 `AUCTurboRunner` 完成实现：
    - 读取 `FFmpegRunner` 导出的音频文件；
    - 检查时长/体积，超限时抛出自定义异常交由 VideoManager 回退；
    - 将音频内容做 base64 并一次性 POST 至火山 API；
@@ -26,7 +26,7 @@
 ```yaml
 glass:
   speech_to_text:
-    provider: whisperx  # whisperx | auc_turbo
+    provider: auc_turbo
     auc_turbo:
       base_url: https://openspeech.bytedance.com/api/v3
       resource_id: volc.bigasr.auc_turbo
@@ -37,7 +37,7 @@ glass:
       max_duration_sec: 7200
 ```
 
-未配置密钥或 provider 仍为 `whisperx` 时继续走本地模型，保证 “never break userspace”。
+未配置密钥会导致实例化 `AUCTurboRunner` 失败；CLI 与 API 会直接报错并提示补齐凭证。
 
 ## 4. 请求规范
 
@@ -108,13 +108,13 @@ glass:
 | `words`                    | 当前阶段可丢弃，或在 `raw_response` 中保留 |
 | `audio_info.duration`      | 可写入 `raw_response`，供调试/监控使用     |
 
-若 `utterances` 为空需要视为异常，抛出 `ValueError` 以保持与 WhisperX runner 行为一致。
+若 `utterances` 为空需要视为异常，抛出 `ValueError` 以保持与通用 `SpeechToTextRunner` 行为一致。
 
 ## 6. 错误与回退策略
 
 1. **超时/网络失败**：HTTP 非 200、超时、`X-Api-Status-Code ≠ 20000000` 直接抛异常，由 `LocalVideoManager` 写入 FAILED 状态；上层可重试或切换 provider。
 2. **配额/鉴权错误**：捕获 4xx/5xx，记录 `X-Tt-Logid`，提醒用户检查密钥或额度。
-3. **文件过大/过长**：在上传前就校验 `max_file_size_mb` 与 `max_duration_sec`，必要时自动改用 WhisperX。保持单一代码路径，别额外搞状态文件。
+3. **文件过大/过长**：在上传前就校验 `max_file_size_mb` 与 `max_duration_sec`，若超限直接抛错并提示用户拆分素材后重试。
 
 ## 7. 实用提示
 

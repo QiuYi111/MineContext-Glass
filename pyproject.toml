@@ -40,7 +40,6 @@ dependencies = [
     "volcengine",
     "pillow",
     "imagehash",
-    "whisperx",
     "requests",
 ]
 

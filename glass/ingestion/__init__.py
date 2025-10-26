@@ -6,7 +6,6 @@ from .models import AlignmentManifest, AlignmentSegment, IngestionStatus, Segmen
 from .runner_factory import build_speech_to_text_runner_from_config
 from .speech_to_text import SpeechToTextRunner, TranscriptionResult
 from .video_manager import TimelineNotFoundError, VideoManager
-from .whisperx_runner import WhisperXRunner
 
 __all__ = [
     "AudioExtractionResult",
@@ -22,7 +21,6 @@ __all__ = [
     "SpeechToTextRunner",
     "TranscriptionResult",
     "VideoManager",
-    "WhisperXRunner",
     "LocalVideoManager",
     "GlassIngestionService",
     "build_speech_to_text_runner_from_config",

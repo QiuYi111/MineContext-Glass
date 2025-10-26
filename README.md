@@ -18,7 +18,7 @@ Built on ByteDance's [MineContext](https://github.com/volcengine/MineContext), e
   <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-blue.svg">
   <img alt="uv managed env" src="https://img.shields.io/badge/uv-managed%20env-6f42c1.svg">
   <img alt="ffmpeg required" src="https://img.shields.io/badge/ffmpeg-required-brightgreen.svg">
-  <img alt="WhisperX optional" src="https://img.shields.io/badge/WhisperX-optional%20GPU-orange.svg">
+  <img alt="AUC Turbo" src="https://img.shields.io/badge/AUC%20Turbo-required%20API-red.svg">
 </p>
 
 ## Vision
@@ -33,13 +33,14 @@ By standing on MineContext's mature context engineering foundations, we combine 
 - Adaptive frame sampling and embedding generation to distill long recordings into meaningful context snippets ready for retrieval.
 - Unified context indexing that merges video-derived insights with the original MineContext knowledge base.
 - Event and highlight surfacing that transforms raw clips into timelines, daily digests, and recall prompts.
+- Doubao AUC Turbo transcription that turns audio tracks into aligned text segments without running heavyweight local models.
 
 ## Roadmap
 
 | Status           | Milestone              | Description                                                                        |
 | ---------------- | ---------------------- | ---------------------------------------------------------------------------------- |
 | ✅ Completed     | Video capture pipeline | Daily video recording, compression, and context extraction are production-ready.   |
-| 🛠️ In Progress | Speech recognition     | Transcribe on-device audio to bring voice context into the knowledge graph.        |
+| ✅ Completed     | Speech recognition     | Doubao AUC Turbo transcription keeps voice context aligned with video timelines.  |
 | 🧪 Planned       | Multimodal synthesis   | Fuse visual, audio, and digital signals into richer summaries and proactive tasks. |
 
 ## Quick Start
@@ -71,7 +72,23 @@ pip install -e .
 
 1. Duplicate `config/config.yaml.example` (or your existing MineContext config) to `config/config.yaml`.
 2. Set API keys, embedding models, and storage paths as needed.
-3. Under the new `[video]` section, configure the glasses import directory and transcoding preferences.
+3. Configure the Glass block so AUC Turbo credentials are available:
+
+```yaml
+glass:
+  speech_to_text:
+    provider: auc_turbo
+    auc_turbo:
+      base_url: https://openspeech.bytedance.com/api/v3
+      resource_id: volc.bigasr.auc_turbo
+      app_key: "${AUC_APP_KEY:}"
+      access_key: "${AUC_ACCESS_KEY:}"
+      request_timeout: 120
+      max_file_size_mb: 100
+      max_duration_sec: 7200
+```
+
+Credentials can live in the config file, environment variables, or be passed as CLI flags. See `glass/new_auc.md` for quotas, error codes, and troubleshooting tips.
 
 ### Start the Pipeline
 
@@ -83,33 +100,45 @@ uv run opencontext start --port 8000 --config config/config.yaml
 
 Glasses footage dropped into the configured import path will be processed automatically. Use the CLI or API endpoints to inspect timelines, digests, and retrieved clips.
 
-### End-to-End Vlog Pipeline
+### Speech Recognition with AUC Turbo
 
-We now recommend the consolidated `opencontext.tools.vlog` workflow, which stitches together frame extraction, WhisperX transcription, and daily report generation. It verifies `ffmpeg` availability, initializes logging, and waits for processors to drain before moving on to the next stage.
+1. Export the required credentials (or supply them via CLI flags):
+
+   ```bash
+   export AUC_APP_KEY=your-app-key
+   export AUC_ACCESS_KEY=your-access-key
+   ```
+
+2. Run the full-stack smoke test, which ingests the sample video, calls AUC Turbo, stores the manifest, and generates a report:
+
+   ```bash
+   uv run python glass/scripts/glass_cli_smoke_test.py --run-id dev-smoke
+   ```
+
+   The script accepts overrides such as `--auc-app-key`, `--auc-access-key`, `--auc-resource-id`, and `--auc-model-name`. Outputs live under `persist/glass_cli_smoke/<run-id>/`.
+
+### Generate Glass Reports
+
+Once a timeline has been ingested, you can produce scoped summaries directly from the CLI:
 
 ```bash
-uv run python -m opencontext.tools.vlog --date 2025-02-27 --frame-interval 5
+uv run python -m opencontext.cli glass report \
+  --timeline-id <timeline> \
+  --lookback-minutes 120 \
+  --output persist/reports/<timeline>.md
 ```
 
-Key options:
-
-- `--no-transcribe` to skip WhisperX while keeping frame ingestion.
-- `--whisper-model`, `--device`, `--compute-type`, and `--batch-size` to tune transcription performance.
-- `--save-transcripts` and `--transcript-dir persist/transcripts` to persist JSON outputs locally.
-- `--diarize --hf-token <token>` to enable speaker diarization once you configure a HuggingFace token.
-- `--skip-extract` or `--no-clean` to reuse existing frames inside `persist/vlog_frames/<DATE>/`.
-
-Successful runs drop reports under `persist/reports/<date>.md`, with optional transcript artifacts stored alongside.
+The report command reads the contexts persisted by the Glass timeline processor and writes Markdown files suitable for sharing.
 
 ### Frame-Only Ingest (Legacy)
 
-For scheduled processing of a day's recordings, place raw `.mp4` files under `videos/<DATE>/` (for example `videos/2025-02-27/12-13.mp4`) and run:
+If you only need frame extraction (for example, benchmarking embedding throughput), place raw `.mp4` files under `videos/<DATE>/` (such as `videos/2025-02-27/12-13.mp4`) and run:
 
 ```bash
 uv run opencontext.tools.daily_vlog_ingest
 ```
 
-The tool extracts frames, updates the context store, and writes summaries to `persist/reports/<date>.md`. Adjust the target date or frame interval with flags such as `--date YYYY-MM-DD` and `--frame-interval 5`.
+This legacy tool extracts frames, updates the context store, and writes summaries to `persist/reports/<date>.md`. Speech recognition is no longer performed here; the Glass ingestion flow handles it through AUC Turbo when you process the resulting timelines.
 
 ## Architecture
 
@@ -117,7 +146,7 @@ MineContext Glass keeps the original context-flow of `context_capture → contex
 
 - **Video Capture Manager** (upcoming) pulls footage from smart glasses, handles deduplication, and writes raw assets to managed storage.
 - **Video Processing Pipeline** extracts frames, runs embeddings, and forwards structured snippets into the context store.
-- **Speech Recognition Layer** (upcoming) will transcribe audio tracks and attach text spans to the same timeline entries as their visual counterparts.
+- **Speech Recognition Layer** (AUC Turbo) transcribes audio tracks via Doubao AUC Turbo and attaches aligned text spans to the same timeline entries as their visual counterparts.
 - **Unified Retrieval API** exposes both cyberspace and real-life context through a single search and recommendation surface.
 
 Refer to `opencontext/` for CLI entry points, managers, storage adapters, and utilities; configuration files live under `config/`, while runtime data persists in `persist/` and `logs/`.

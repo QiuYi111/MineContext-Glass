@@ -22,7 +22,7 @@ class VideoManager(ABC):
 
         Implementations should:
         1. Normalize/validate the source path.
-        2. Coordinate ffmpeg frame extraction and WhisperX transcription.
+        2. Coordinate ffmpeg frame extraction and speech transcription.
         3. Persist results and return a stable manifest.
         """
 

@@ -12,7 +12,6 @@ from .ffmpeg_runner import FFmpegRunner
 from .models import AlignmentManifest, AlignmentSegment, IngestionStatus, SegmentType
 from .video_manager import TimelineNotFoundError, VideoManager
 from .speech_to_text import SpeechToTextRunner, TranscriptionResult
-from .whisperx_runner import WhisperXRunner
 
 
 class LocalVideoManager(VideoManager):
@@ -38,10 +37,12 @@ class LocalVideoManager(VideoManager):
     ) -> None:
         if frame_rate <= 0:
             raise ValueError("frame_rate must be positive")
+        if speech_runner is None:
+            raise ValueError("speech_runner is required for LocalVideoManager")
 
         self._base_dir = (base_dir or Path("persist") / "glass").resolve()
         self._ffmpeg = ffmpeg_runner or FFmpegRunner()
-        self._speech = speech_runner or WhisperXRunner()
+        self._speech = speech_runner
         self._frame_rate = frame_rate
 
         self._base_dir.mkdir(parents=True, exist_ok=True)

@@ -192,7 +192,7 @@ prompts:
 # Glass ingestion configuration
 glass:
   speech_to_text:
-    provider: whisperx  # whisperx | auc_turbo
+    provider: auc_turbo
     auc_turbo:
       base_url: https://openspeech.bytedance.com/api/v3
       resource_id: volc.bigasr.auc_turbo

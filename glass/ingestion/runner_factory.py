@@ -8,29 +8,23 @@ from opencontext.config.global_config import GlobalConfig
 
 from .auc_runner import AUCTurboConfig, AUCTurboRunner
 from .speech_to_text import SpeechToTextRunner
-from .whisperx_runner import WhisperXRunner
 
 
 def build_speech_to_text_runner_from_config() -> SpeechToTextRunner:
     """
     Construct a speech-to-text runner based on the loaded configuration.
-
-    Falls back to WhisperX if the configuration is missing, invalid, or the
-    remote runner cannot be initialised.
     """
 
     stt_config = _load_speech_config()
-    provider = (stt_config.get("provider") or "whisperx").lower()
+    provider = (stt_config.get("provider") or "auc_turbo").lower()
+    if provider != "auc_turbo":
+        logger.warning("Glass speech_to_text now requires provider=auc_turbo (got %s). Forcing AUC Turbo.", provider)
 
-    if provider == "auc_turbo":
-        try:
-            auc_config = AUCTurboConfig.from_dict(stt_config.get("auc_turbo"))
-            return AUCTurboRunner(config=auc_config)
-        except Exception as exc:  # noqa: BLE001 - want the exact reason in logs
-            logger.warning("Failed to initialise AUC Turbo runner: {}", exc)
-            logger.warning("Falling back to WhisperX.")
-
-    return WhisperXRunner()
+    try:
+        auc_config = AUCTurboConfig.from_dict(stt_config.get("auc_turbo"))
+        return AUCTurboRunner(config=auc_config)
+    except Exception as exc:  # noqa: BLE001 - want the exact reason in logs
+        raise RuntimeError("Failed to initialise AUC Turbo runner from configuration") from exc
 
 
 def _load_speech_config() -> dict[str, Any]:

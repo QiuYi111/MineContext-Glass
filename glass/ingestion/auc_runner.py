@@ -92,9 +92,10 @@ class AUCTurboRunner(SpeechToTextRunner):
             raise AUCTurboError("AUC Turbo request failed") from exc
 
         if response.status_code != 200:
+            message = self._extract_error_message(response)
             raise AUCTurboError(
                 f"AUC Turbo returned HTTP {response.status_code} "
-                f"(request_id={request_id})"
+                f"(request_id={request_id}, message={message})"
             )
 
         status_code = response.headers.get("X-Api-Status-Code")
@@ -115,8 +116,8 @@ class AUCTurboRunner(SpeechToTextRunner):
     def _build_headers(self) -> dict[str, str]:
         return {
             "Content-Type": "application/json",
-            "X-Api-App-Key": self._config.app_key,
-            "X-Api-Access-Key": self._config.access_key,
+            "X-Api-App-Key": str(self._config.app_key),
+            "X-Api-Access-Key": str(self._config.access_key),
             "X-Api-Resource-Id": self._config.resource_id,
             "X-Api-Request-Id": uuid.uuid4().hex,
             "X-Api-Sequence": "-1",
@@ -125,7 +126,7 @@ class AUCTurboRunner(SpeechToTextRunner):
     def _build_payload(self, audio_path: Path) -> dict[str, Any]:
         encoded_audio = base64.b64encode(audio_path.read_bytes()).decode("ascii")
         return {
-            "user": {"uid": self._config.app_key},
+            "user": {"uid": str(self._config.app_key)},
             "audio": {"data": encoded_audio},
             "request": {"model_name": self._config.model_name},
         }
@@ -163,3 +164,14 @@ class AUCTurboRunner(SpeechToTextRunner):
                 return frames / float(frame_rate)
         except (wave.Error, OSError):
             return None
+
+    @staticmethod
+    def _extract_error_message(response: requests.Response) -> str:
+        header_msg = response.headers.get("X-Api-Message")
+        if header_msg:
+            return header_msg
+        try:
+            data = response.json()
+            return data.get("message") or data.get("error_msg") or response.text
+        except ValueError:
+            return response.text or "unknown error"

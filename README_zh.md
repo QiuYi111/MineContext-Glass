@@ -21,9 +21,9 @@
   - [安装](#安装)
   - [配置](#配置)
   - [启动管线](#启动管线)
-  - [全量 vlog 管线](#全量-vlog-管线)
+  - [AUC Turbo 全链路](#auc-turbo-全链路)
+  - [生成 Glass 报告](#生成-glass-报告)
   - [仅抽帧批处理（旧版）](#仅抽帧批处理旧版)
-  - [WhisperX 语音转写](#whisperx-语音转写)
 - [架构总览](#架构总览)
 - [参与贡献](#参与贡献)
 - [许可证](#许可证)
@@ -40,15 +40,14 @@ MineContext Glass 以真实世界为原点重新想象个人上下文管理。�
 - 自适应抽帧与向量嵌入，将长视频蒸馏为可检索的语义片段。
 - 统一索引层把视频洞察与原 MineContext 数据库合并，实现跨模态检索。
 - 事件与高光生成，把原始素材转化为时间线、日常摘要和回顾提示。
-- `opencontext.tools.vlog` 全量脚本，将抽帧、WhisperX 转写、日报生成整合为一条命令。
-- WhisperX 语音转写脚本，可将视频音轨转为带时间戳的文本并写入上下文。
+- 火山极速识别（AUC Turbo）语音转写，直接将音轨转换为对齐文本并写入上下文。
 
 ## 路线图
 
 | 状态        | 里程碑             | 说明                                                   |
 | ----------- | ------------------ | ------------------------------------------------------ |
 | ✅ 已完成   | 视频采集与处理管线 | 支持日常视频录制、压缩与上下文抽取，已投入使用。       |
-| ✅ 已完成   | 语音识别           | 提供 WhisperX 转写工具，生成时间戳文本并写入上下文图谱。 |
+| ✅ 已完成   | 语音识别           | 通过火山极速识别（AUC Turbo）生成对齐文本并写入上下文图谱。 |
 | 🧪 计划中   | 多模态融合生成     | 联合视觉、语音与数字信号，产出更丰富的总结与主动任务。 |
 
 ## 快速开始
@@ -80,7 +79,23 @@ pip install -e .
 
 1. 复制 `config/config.yaml.example`（或现有 MineContext 配置）为 `config/config.yaml`。
 2. 根据需要填写 API 密钥、嵌入模型和存储路径。
-3. 在新增的 `[video]` 配置段中，指定眼镜素材导入目录与转码策略。
+3. 在 `glass.speech_to_text` 段落中配置 AUC Turbo：
+
+```yaml
+glass:
+  speech_to_text:
+    provider: auc_turbo
+    auc_turbo:
+      base_url: https://openspeech.bytedance.com/api/v3
+      resource_id: volc.bigasr.auc_turbo
+      app_key: "${AUC_APP_KEY:}"
+      access_key: "${AUC_ACCESS_KEY:}"
+      request_timeout: 120
+      max_file_size_mb: 100
+      max_duration_sec: 7200
+```
+
+密钥可以写在配置文件、环境变量或 CLI 参数中；更多额度、限流与排障细节见 `glass/new_auc.md`。
 
 ### 启动管线
 
@@ -92,49 +107,47 @@ uv run opencontext start --port 8000 --config config/config.yaml
 
 当智能眼镜素材同步到配置的导入路径后，管线会自动触发处理。可通过 CLI 或 API 查看时间线、摘要以及检索结果。
 
-### 全量 vlog 管线
+### AUC Turbo 全链路
 
-推荐使用整合后的 `opencontext.tools.vlog` 脚本完成抽帧、WhisperX 转写与日报生成。脚本会自动检测 `ffmpeg`、初始化日志，并在每个阶段等待处理器队列清空后继续下一步。
+1. 在终端导出 AUC Turbo 凭证（或在运行脚本时通过参数传入）：
+
+   ```bash
+   export AUC_APP_KEY=你的AppKey
+   export AUC_ACCESS_KEY=你的AccessKey
+   ```
+
+2. 运行 `glass/scripts/glass_cli_smoke_test.py`，一次性完成 ffmpeg 处理、火山极速识别转写、时间线写入与报告生成：
+
+   ```bash
+   uv run python glass/scripts/glass_cli_smoke_test.py --run-id dev-smoke
+   ```
+
+   可按需覆盖 `--auc-app-key`、`--auc-access-key`、`--auc-resource-id`、`--auc-model-name` 等参数。所有产物会写入 `persist/glass_cli_smoke/<run-id>/`，便于回溯。
+
+脚本失败时请根据提示的 HTTP 状态码与 `request_id` 排查，常见处理方式详见 `glass/new_auc.md`。
+
+### 生成 Glass 报告
+
+时间线入库后，可通过 CLI 输出带时间范围的日报：
 
 ```bash
-uv run python -m opencontext.tools.vlog --date 2025-02-27 --frame-interval 5
+uv run python -m opencontext.cli glass report \
+  --timeline-id <timeline> \
+  --lookback-minutes 120 \
+  --output persist/reports/<timeline>.md
 ```
 
-常用参数：
-
-- `--no-transcribe`：跳过 WhisperX 转写，仅保留抽帧与摘要。
-- `--whisper-model`、`--device`、`--compute-type`、`--batch-size`：调优 WhisperX 性能。
-- `--save-transcripts` 与 `--transcript-dir persist/transcripts`：保存 JSON 转写文件。
-- `--diarize --hf-token <token>`：启用说话人分离（需配置 HuggingFace 令牌）。
-- `--skip-extract` 或 `--no-clean`：重复使用 `persist/vlog_frames/<日期>/` 目录下已有图片。
-
-成功运行后会在 `persist/reports/<date>.md` 写入日报，如启用保存转写则会在 `persist/transcripts/` 生成对应 JSON。
+该命令会读取 Glass Timeline Processor 写入的上下文，生成 Markdown 报告，方便分享或归档。
 
 ### 仅抽帧批处理（旧版）
 
-若仅需执行抽帧并写入截图上下文（例如调试或在 WhisperX 部署前测试流程），可运行保留的旧脚本：
+若仅需执行抽帧并写入截图上下文（例如调试或在语音服务不可用时验证流程），可运行保留的旧脚本：
 
 ```bash
 uv run opencontext.tools.daily_vlog_ingest
 ```
 
-脚本会抽帧、写入上下文并在 `persist/reports/<date>.md` 生成 Markdown 总结，可通过 `--date YYYY-MM-DD`、`--frame-interval 5` 等参数指定日期或抽帧间隔。
-
-### WhisperX 语音转写
-
-如需对单个视频批量转写，或在独立环境调试 WhisperX，可直接调用：
-
-```bash
-uv run python -m opencontext.tools.whisperx_transcribe videos/2025-02-27/12-13.mp4 --save-output
-```
-
-常用参数：
-
-- `--diarize --hf-token <token>`：开启说话人分离（需要 HuggingFace 访问令牌）。
-- `--skip-ingest`：仅生成 JSON 文件，不推送到 OpenContext 管线。
-- `--output-dir`：调整转写结果的保存目录（默认 `persist/transcripts`）。
-
-转写时需要预先安装 WhisperX 及其依赖；脚本会自动检测 `ffmpeg` 和 GPU 能力，默认在 GPU 上以 `float16` 精度运行。
+脚本会抽帧、写入上下文并在 `persist/reports/<date>.md` 生成 Markdown 总结，可通过 `--date YYYY-MM-DD`、`--frame-interval 5` 等参数指定日期或抽帧间隔。语音识别现已全部交由 Glass 管线的 AUC Turbo runner 负责，该脚本仅适合验证抽帧流程。
 
 ## 架构总览
 
@@ -142,7 +155,7 @@ MineContext Glass 延续原有的 `context_capture → context_processing → st
 
 - **视频捕获管理器(开发中)**：负责从智能眼镜拉取素材、去重并写入受管存储。
 - **视频处理管线**：执行抽帧、生成嵌入，并将结构化片段写入上下文存储。
-- **语音识别层（WhisperX）**：把音轨转为带时间戳的文本，附着到对应的时间线节点。
+- **语音识别层（AUC Turbo）**：通过火山极速识别将音轨转为带时间戳的文本，附着到对应的时间线节点。
 - **统一检索 API**：在同一入口提供赛博上下文与现实世界上下文的查询与推荐。
 
 代码入口仍位于 `opencontext/` 目录；配置文件在 `config/`；运行时数据写入 `persist/` 与 `logs/`（请勿提交到版本库）。

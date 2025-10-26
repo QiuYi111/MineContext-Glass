@@ -4,7 +4,29 @@ from pathlib import Path
 
 import pytest
 
-from glass.ingestion import IngestionStatus, LocalVideoManager
+from glass.ingestion import (
+    AlignmentSegment,
+    IngestionStatus,
+    LocalVideoManager,
+    SegmentType,
+    SpeechToTextRunner,
+    TranscriptionResult,
+)
+
+
+class _StubSpeechRunner(SpeechToTextRunner):
+    def transcribe(self, audio_path: Path, *, timeline_id: str) -> TranscriptionResult:  # noqa: D401
+        return TranscriptionResult(
+            segments=[
+                AlignmentSegment(
+                    start=0.0,
+                    end=1.0,
+                    type=SegmentType.AUDIO,
+                    payload=f"stub transcript for {timeline_id}",
+                )
+            ],
+            raw_response={"segments": [{"start": 0.0, "end": 1.0}]},
+        )
 
 
 @pytest.mark.slow
@@ -13,7 +35,7 @@ def test_local_video_manager_runs_pipeline(tmp_path: Path) -> None:
     if not sample_video.exists():
         pytest.skip("sample video not available")
 
-    manager = LocalVideoManager(base_dir=tmp_path, frame_rate=0.5)
+    manager = LocalVideoManager(base_dir=tmp_path, frame_rate=0.5, speech_runner=_StubSpeechRunner())
     manifest = manager.ingest(sample_video)
 
     assert manifest.timeline_id

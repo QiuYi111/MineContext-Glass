@@ -3,7 +3,7 @@
 MineContext Glass extends the existing MineContext pipeline to ingest first-person video and expose aligned multimodal context to downstream consumers without disturbing the legacy screenshot workflow.
 
 ## Directory Overview
-- `ingestion/`: Video intake interfaces such as `VideoManager`, ffmpeg helpers, and WhisperX wrappers.
+- `ingestion/`: Video intake interfaces such as `VideoManager`, ffmpeg helpers, and AUC Turbo runners.
 - `processing/`: Chunkers and encoders that convert manifests into embeddings.
 - `storage/`: Repositories for persisting aligned segments and metadata.
 - `ui/`: Glass-specific UI assets and front-end integrations.

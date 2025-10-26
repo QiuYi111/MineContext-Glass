@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from glass.ingestion import AlignmentManifest, AlignmentSegment, SegmentType, WhisperXRunner
+from glass.ingestion import AlignmentManifest, AlignmentSegment, SegmentType
 
 
 def test_alignment_segment_validates_range() -> None:
@@ -88,25 +88,3 @@ def test_manifest_iter_segments_filters_by_type() -> None:
     frames = list(manifest.iter_segments(SegmentType.FRAME))
     assert len(frames) == 1
     assert frames[0].type is SegmentType.FRAME
-
-
-def test_whisper_runner_build_segments() -> None:
-    runner = WhisperXRunner()
-    manifest_segments = runner.build_segments(
-        {
-            "segments": [
-                {"start": 0.0, "end": 1.0, "text": "hello"},
-                {"start": 1.0, "end": 2.5, "text": "world"},
-            ]
-        }
-    )
-
-    assert len(manifest_segments) == 2
-    assert manifest_segments[0].payload == "hello"
-    assert manifest_segments[0].type is SegmentType.AUDIO
-
-
-def test_whisper_runner_build_segments_raises_on_empty_output() -> None:
-    runner = WhisperXRunner()
-    with pytest.raises(ValueError):
-        runner.build_segments({"segments": []})

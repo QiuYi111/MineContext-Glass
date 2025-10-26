@@ -16,7 +16,7 @@
 - **所有权**：视频文件属于本地缓存，转写文本与帧特征存入数据库/对象存储；索引键必须由 `VideoManager` 分配并传递，避免多头生成。
 
 ### 2.2 特殊情况识别
-- 视频格式差异、损坏帧、音频缺失、转写失败都是特殊情况。通过统一的导入流水线（ffmpeg 预处理 + whisperX 转写）和状态机记录，将失败作为状态而非分支，避免在后续层级写 `if/else`。
+- 视频格式差异、损坏帧、音频缺失、转写失败都是特殊情况。通过统一的导入流水线（ffmpeg 预处理 + AUC Turbo 转写）和状态机记录，将失败作为状态而非分支，避免在后续层级写 `if/else`。
 - 多模态对齐需一次性完成，否则下游会遍地补丁。核心是生成 `alignment_manifest`，任何消费方只读 manifest。
 
 ### 2.3 复杂度审查
@@ -36,7 +36,7 @@
 ## 3. 架构原则
 - **好品味**：设计对齐后的数据模型，让视频/音频统一描述，避免后续每个模块加条件判断。
 - **Never break userspace**：任何对现有 CLI、配置、数据库、API 的修改都加版本保护，默认关闭 Glass 模式。
-- **实用主义**：优先选择成熟工具（ffmpeg、whisperX、sqlite/pg 向量扩展），不造轮子。
+- **实用主义**：优先选择成熟工具（ffmpeg、火山极速识别、sqlite/pg 向量扩展），不造轮子。
 - **简洁执念**：模块最小化；拒绝超过三层嵌套的流程控制，所有异常用状态而非嵌套。
 
 ## 4. 实施路线图
@@ -56,7 +56,7 @@
 
 **开发记录**
 - 定义 `VideoManager` 抽象与 `LocalVideoManager` 实现，落地 manifest 输出、状态文件与异常路径。
-- 编写 `FFmpegRunner` 和 `WhisperXRunner`，将抽帧、音频抽取、WhisperX 转写封装成可测单元。
+- 编写 `FFmpegRunner` 和 `AUCTurboRunner`，将抽帧、音频抽取、火山极速识别转写封装成可测单元。
 - 建立 `AlignmentManifest` / `AlignmentSegment` 数据模型，自动排序并拒绝空段。
 - 在 `persist/glass` 下输出 `alignment_manifest.json`、`status.json`、原始转写以支撑后续链路。
 
@@ -125,7 +125,7 @@
 
 ### Phase 6：部署与脚本
 1. `scripts/install_glass.sh`：基于 `uv` 或 `mamba` 拉起环境，检测 CUDA。
-2. Dockerfile 新增 `glass` 构建阶段，镜像中包含 ffmpeg、whisperX 依赖。
+2. Dockerfile 新增 `glass` 构建阶段，镜像中包含 ffmpeg 及访问火山极速识别所需的系统依赖（curl、ca 证书等）。
 3. `build.sh` 扩展，允许 `./build.sh glass` 触发 PyInstaller + 资源打包。
 4. 文档更新：`docs/glass_setup.md`、`README.md` 中加入 Glass 说明。
 
@@ -134,8 +134,8 @@
 - 加入 CI 任务：视频样本流水线 smoke test，确保“Never break userspace”。
 
 ## 5. 风险与缓释
-- **依赖重量级库**：ffmpeg、whisperX 体积大 → 提前写安装脚本与缓存策略。
-- **GPU 可用性**：whisperX 需 GPU，提供 CPU 降级模式并警告性能。
+- **依赖重量级库**：ffmpeg、音视频工具体积大 → 提前写安装脚本与缓存策略。
+- **外部 API 可用性**：AUC Turbo 依赖公网访问和凭证配额 → 监控错误码，必要时提示稍后重试。
 - **数据量膨胀**：关键帧与转写占用空间 → 设计清理策略（TTL、分级存储）。
 - **隐私合规**：视频包含敏感信息 → 设计本地优先架构，禁默认上传云端。
 
