@@ -197,6 +197,43 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to write the generated report"
     )
 
+    glass_start_parser = glass_subparsers.add_parser(
+        "start",
+        help="Ingest videos from disk, process timelines, and generate reports",
+    )
+    glass_start_parser.add_argument(
+        "--date",
+        required=True,
+        help="Date folder under videos/ in format dd-mm (e.g., 22-10)",
+    )
+    glass_start_parser.add_argument(
+        "--config",
+        type=str,
+        help="Optional configuration path overriding global defaults",
+    )
+    glass_start_parser.add_argument(
+        "--report-output",
+        type=str,
+        help="Optional directory to write generated reports (defaults to timeline folders)",
+    )
+    glass_start_parser.add_argument(
+        "--frame-rate",
+        type=float,
+        default=1.0,
+        help="Frame sampling rate used during ingestion (default: 1.0 fps)",
+    )
+    glass_start_parser.add_argument(
+        "--whisper-model",
+        type=str,
+        default="tiny",
+        help="WhisperX model size used for transcription (default: tiny)",
+    )
+    glass_start_parser.add_argument(
+        "--timeline-prefix",
+        type=str,
+        help="Optional prefix applied to generated timeline IDs",
+    )
+
     return parser.parse_args()
 
 

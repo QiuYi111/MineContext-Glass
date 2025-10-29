@@ -4,7 +4,7 @@ from __future__ import annotations
 Full pipeline regression test for the Glass timeline processor.
 
 This script runs the entire ingestion + processing + report workflow against
-the tracked video in `videos/25-10/6-22.mp4`. Unlike the original smoke test it
+all tracked videos found under `videos/<dd-mm>/`. Unlike the original smoke test it
 relies on the real ffmpeg tooling, the Glass storage path, and the Doubao AUC
 Turbo (火山极速识别) speech service.
 
@@ -21,7 +21,9 @@ Expectations:
 """
 
 import argparse
+import mimetypes
 import os
+import re
 import subprocess
 import sys
 import time
@@ -43,6 +45,85 @@ from glass.processing.timeline_processor import GlassTimelineProcessor
 from glass.processing.visual_encoder import VisualEncoder
 from glass.storage.context_repository import GlassContextRepository
 
+KNOWN_VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".avi",
+    ".webm",
+    ".mpg",
+    ".mpeg",
+    ".m4v",
+    ".wmv",
+    ".flv",
+    ".ts",
+    ".mp2",
+}
+
+
+def _is_video_file(path: Path) -> bool:
+    """Heuristically determine if a path points to a video file."""
+    if not path.is_file():
+        return False
+    mime_type, _ = mimetypes.guess_type(path.name)
+    if mime_type and mime_type.startswith("video/"):
+        return True
+    return path.suffix.lower() in KNOWN_VIDEO_EXTENSIONS
+
+
+def _discover_video_paths(repo_root: Path, override: str | None) -> list[Path]:
+    """Collect all video files to run through the smoke test."""
+    if override:
+        candidate = Path(override).expanduser().resolve()
+        if not candidate.exists():
+            raise FileNotFoundError(f"Video path override missing: {candidate}")
+        if candidate.is_file():
+            return [candidate]
+        videos = sorted(path for path in candidate.rglob("*") if _is_video_file(path))
+        if videos:
+            return videos
+        raise FileNotFoundError(f"No video files found under override directory: {candidate}")
+
+    videos_root = repo_root / "videos"
+    if not videos_root.exists():
+        raise FileNotFoundError(f"Videos directory missing: {videos_root}")
+
+    videos = sorted(path for path in videos_root.rglob("*") if _is_video_file(path))
+    if not videos:
+        raise FileNotFoundError(f"No video files found below {videos_root}")
+    return videos
+
+
+def _sanitize_identifier(value: str) -> str:
+    """Sanitize strings for safe reuse in run/timeline identifiers."""
+    normalized = re.sub(r"[^0-9a-zA-Z]+", "-", value).strip("-")
+    return normalized.lower() or "video"
+
+
+def _derive_run_id(
+    base_run_id: str | None,
+    sample_video: Path,
+    *,
+    batch_token: str,
+    index: int,
+) -> str:
+    suffix = f"{index + 1:02d}-{_sanitize_identifier(sample_video.stem)}"
+    if base_run_id:
+        return f"{base_run_id}-{suffix}"
+    return f"{batch_token}-{suffix}"
+
+
+def _derive_timeline_id(
+    base_timeline_id: str | None,
+    sample_video: Path,
+    *,
+    index: int,
+) -> str:
+    suffix = f"{index + 1:02d}-{_sanitize_identifier(sample_video.stem)}"
+    if base_timeline_id:
+        return f"{base_timeline_id}-{suffix}"
+    return f"smoke-{suffix}"
+
 
 def _coalesce_numeric_cli_env(
     cli_value: float | None,
@@ -59,18 +140,6 @@ def _coalesce_numeric_cli_env(
         return float(env_value)
     except ValueError as exc:  # noqa: B904 - want context
         raise ValueError(f"Environment variable {env_name} must be numeric") from exc
-
-
-def _resolve_video_path(repo_root: Path, override: str | None) -> Path:
-    """Return the sample video path, optionally overridden by CLI."""
-    if override:
-        candidate = Path(override).expanduser()
-    else:
-        candidate = repo_root / "videos" / "25-10" / "6-22.mp4"
-    candidate = candidate.resolve()
-    if not candidate.exists():
-        raise FileNotFoundError(f"Sample video missing: {candidate}")
-    return candidate
 
 
 def _load_auc_config_from_global() -> AUCTurboConfig:
@@ -212,10 +281,16 @@ def _summarize_repository(repo: GlassContextRepository, timeline_id: str) -> int
     return len(repo.fetch_by_timeline(timeline_id))
 
 
-def run_smoke_test(args: argparse.Namespace) -> Path:
+def run_smoke_test(
+    args: argparse.Namespace,
+    sample_video: Path,
+    *,
+    run_id: str | None = None,
+    timeline_id: str | None = None,
+) -> Path:
     """Execute the end-to-end smoke workflow and return the report path."""
     repo_root = Path(__file__).resolve().parents[2]
-    run_dir = _prepare_workspace(repo_root, override=args.run_id)
+    run_dir = _prepare_workspace(repo_root, override=run_id or args.run_id)
     _initialize_singletons(repo_root / "config" / "config.yaml")
 
     repository = GlassContextRepository()
@@ -231,12 +306,11 @@ def run_smoke_test(args: argparse.Namespace) -> Path:
         speech_runner=speech_runner,
     )
 
-    sample_video = _resolve_video_path(repo_root, args.video_path)
-    timeline_id = args.timeline_id or f"smoke-{int(time.time())}"
+    timeline_identifier = timeline_id or args.timeline_id or f"smoke-{int(time.time())}"
     manifest_json = _ingest_sample_video(
         video_manager,
         sample_video,
-        timeline_id=timeline_id,
+        timeline_id=timeline_identifier,
     )
 
     raw_context = RawContextProperties(
@@ -244,7 +318,7 @@ def run_smoke_test(args: argparse.Namespace) -> Path:
         source=ContextSource.VIDEO,
         create_time=datetime.now(timezone.utc),
         additional_info={
-            "timeline_id": timeline_id,
+            "timeline_id": timeline_identifier,
             "alignment_manifest": manifest_json,
         },
     )
@@ -252,12 +326,12 @@ def run_smoke_test(args: argparse.Namespace) -> Path:
     if not processed_contexts:
         raise RuntimeError("Glass timeline processor did not emit any processed contexts.")
 
-    if _summarize_repository(repository, timeline_id) == 0:
+    if _summarize_repository(repository, timeline_identifier) == 0:
         raise RuntimeError("Glass context repository has no records for the timeline.")
 
     report_path = run_dir / "glass_report.md"
     result = _invoke_cli_report(
-        timeline_id,
+        timeline_identifier,
         report_path=report_path,
         lookback_minutes=args.lookback_minutes,
     )
@@ -296,7 +370,7 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--video-path",
-        help="Override the default videos/25-10/6-22.mp4 sample with a custom path.",
+        help="Override the default videos/ tree. Accepts a single file or a directory.",
     )
     parser.add_argument(
         "--ffmpeg-bin",
@@ -347,15 +421,27 @@ def _build_argument_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = _build_argument_parser()
     args = parser.parse_args()
-    try:
-        report_path = run_smoke_test(args)
-    except subprocess.CalledProcessError as exc:
-        if exc.stdout:
-            print(exc.stdout, file=sys.stderr)
-        if exc.stderr:
-            print(exc.stderr, file=sys.stderr)
-        raise
-    print(f"Smoke test completed. Report written to {report_path}")
+    repo_root = Path(__file__).resolve().parents[2]
+    batch_token = datetime.now(timezone.utc).strftime("run-%Y%m%dT%H%M%SZ")
+    videos = _discover_video_paths(repo_root, args.video_path)
+
+    for index, sample_video in enumerate(videos):
+        run_id = _derive_run_id(args.run_id, sample_video, batch_token=batch_token, index=index)
+        timeline_id = _derive_timeline_id(args.timeline_id, sample_video, index=index)
+        try:
+            report_path = run_smoke_test(
+                args,
+                sample_video,
+                run_id=run_id,
+                timeline_id=timeline_id,
+            )
+        except subprocess.CalledProcessError as exc:
+            if exc.stdout:
+                print(exc.stdout, file=sys.stderr)
+            if exc.stderr:
+                print(exc.stderr, file=sys.stderr)
+            raise
+        print(f"Smoke test completed for {sample_video}. Report written to {report_path}")
 
 
 if __name__ == "__main__":
