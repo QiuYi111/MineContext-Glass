@@ -32,6 +32,24 @@ VITE_GLASS_API_BASE="http://your-host:8765" npm run dev
 GLASS_API_PROXY="http://10.0.0.2:9000" npm run dev
 ```
 
+## 轻量后端（FastAPI）
+
+仓库内置了一个最小依赖的 FastAPI 服务，复刻 `/glass` 契约并提供 Demo 数据：
+
+```bash
+# 启动独立后端（默认 8765 端口）
+uv run uvicorn glass.webui.backend.app:app --reload --port 8765
+
+# 自定义模式/目录
+GLASS_BACKEND_MODE=demo \
+GLASS_BACKEND_UPLOAD_DIR="$(pwd)/persist/glass/uploads" \
+uv run uvicorn glass.webui.backend.app:app --port 9000
+```
+
+- Demo 数据存放在 `glass/webui/backend/demo_data/`，默认自动载入。
+- 上传限制可通过 `GLASS_UPLOAD_MAX_SIZE_MB`、`GLASS_UPLOAD_ALLOWED_TYPES` 等环境变量覆盖。
+- 运行 `uv run pytest glass/webui/backend/tests/test_app.py -q` 可验证 REST 契约。
+
 ## 部署
 
 构建完成后，会生成完整的 `dist/` 目录（包含 `index.html`, `app.js`, `app.css` 等）。将该目录放到任意静态服务器（Nginx、Caddy、OSS 等）即可，无需依赖 OpenContext 的静态资源目录。

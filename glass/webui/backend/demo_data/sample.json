@@ -1,0 +1,51 @@
+{
+  "timelines": [
+    {
+      "timeline_id": "demo-timeline-001",
+      "filename": "demo-day.mp4",
+      "source_path": "demo/demo-day.mp4",
+      "status": "completed",
+      "submitted_at": "2025-01-10T08:00:00+00:00",
+      "completed_at": "2025-01-10T08:05:30+00:00",
+      "auto_markdown": "# Auto Daily Report\n\n- Timeline processed in demo mode.",
+      "manual_markdown": null,
+      "manual_metadata": {
+        "pinned_highlights": ["关键事件 #1"]
+      },
+      "highlights": [
+        {
+          "title": "关键事件 #1",
+          "summary": "上午 08:05 完成玻璃拟态 UI 首次录制。",
+          "modality": "frame",
+          "timestamp": 45.0,
+          "segment_start": 45.0,
+          "segment_end": 58.0,
+          "context_id": "demo-timeline-001-ctx-1"
+        },
+        {
+          "title": "关键事件 #2",
+          "summary": "核心交互流程演示完毕，准备生成日报。",
+          "modality": "audio",
+          "timestamp": 120.0,
+          "segment_start": 120.0,
+          "segment_end": 135.0,
+          "context_id": "demo-timeline-001-ctx-2"
+        }
+      ],
+      "visual_cards": [
+        {
+          "image_url": "https://dummyimage.com/800x450/0D6EFD/FFFFFF&text=Glass+Frame+A",
+          "caption": "上传完成后的仪表盘状态",
+          "segment_start": 40.0,
+          "segment_end": 55.0
+        },
+        {
+          "image_url": "https://dummyimage.com/800x450/101010/0D6EFD&text=Glass+Frame+B",
+          "caption": "自动 Daily Report 生成摘要",
+          "segment_start": 110.0,
+          "segment_end": 130.0
+        }
+      ]
+    }
+  ]
+}
