@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections import defaultdict
 from contextlib import contextmanager
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -43,21 +44,40 @@ class GlassContextRepository:
             logger.debug("upsert_aligned_segments called with empty payload")
             return []
 
-        contexts = [item.context for item in items]
-        upserted_ids = self._storage.batch_upsert_processed_context(contexts)
-        if not upserted_ids:
-            # Fallback: vector backend may return None while still persisting the records;
-            # fall back to ProcessedContext ids to maintain reference continuity.
-            upserted_ids = [context.id for context in contexts]
+        # Persist per-context-type batches so we can reliably map returned IDs back to the original items.
+        indexed_by_type: dict[str, list[tuple[int, MultimodalContextItem]]] = defaultdict(list)
+        for index, item in enumerate(items):
+            context = item.context
+            if not context or not context.extracted_data or not context.extracted_data.context_type:
+                raise ValueError("Each context item must carry an extracted context_type")
+            context_type_value = context.extracted_data.context_type.value
+            indexed_by_type[context_type_value].append((index, item))
 
-        if len(upserted_ids) != len(items):
-            raise ValueError(
-                "Vector backend returned unexpected number of IDs; "
-                f"expected {len(items)}, got {len(upserted_ids)}"
-            )
+        persisted_ids: list[str | None] = [None] * len(items)
+        for context_type, indexed_items in indexed_by_type.items():
+            contexts = [item.context for _, item in indexed_items]
+            try:
+                upserted_ids = self._storage.batch_upsert_processed_context(contexts) or []
+            except Exception:
+                logger.exception("Failed to persist contexts for type %s", context_type)
+                raise
+
+            if len(upserted_ids) != len(contexts):
+                logger.debug(
+                    "Vector backend returned %s IDs for %s contexts (type=%s); "
+                    "falling back to intrinsic context IDs.",
+                    len(upserted_ids),
+                    len(contexts),
+                    context_type,
+                )
+                upserted_ids = [context.id for context in contexts]
+
+            for (index, item), context_id in zip(indexed_items, upserted_ids):
+                persisted_ids[index] = context_id
 
         records = []
-        for item, context_id in zip(items, upserted_ids):
+        for index, item in enumerate(items):
+            context_id = persisted_ids[index] or item.context.id
             context_type = None
             if item.context and item.context.extracted_data:
                 context_type = item.context.extracted_data.context_type.value
@@ -106,7 +126,7 @@ class GlassContextRepository:
                 records,
             )
 
-        return upserted_ids
+        return [persisted_id or item.context.id for persisted_id, item in zip(persisted_ids, items)]
 
     def fetch_by_timeline(self, timeline_id: str) -> List[sqlite3.Row]:
         """Fetch raw rows for a timeline. Primarily intended for validation and tests."""

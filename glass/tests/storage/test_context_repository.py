@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import sqlite3
 import uuid
+from collections import defaultdict
 
 import pytest
 
@@ -81,10 +82,17 @@ class _FakeStorage:
         self.contexts: dict[tuple[str, str], ProcessedContext] = {}
 
     def batch_upsert_processed_context(self, contexts: list[ProcessedContext]):
+        buckets: dict[str, list[ProcessedContext]] = defaultdict(list)
         for context in contexts:
-            key = (context.extracted_data.context_type.value, context.id)
+            context_type = context.extracted_data.context_type.value
+            key = (context_type, context.id)
             self.contexts[key] = context
-        return [context.id for context in contexts]
+            buckets[context_type].append(context)
+
+        ordered_ids: list[str] = []
+        for bucket in buckets.values():
+            ordered_ids.extend([ctx.id for ctx in bucket])
+        return ordered_ids
 
     def get_processed_context(self, context_id: str, context_type: str):
         return self.contexts.get((context_type, context_id))
@@ -122,6 +130,49 @@ def test_upsert_persists_and_fetches_segments() -> None:
     assert row["embedding_ready"] == 1
     assert row["content_ref"] == "segment-001"
     assert row["context_type"] == context.extracted_data.context_type.value
+
+
+def test_upsert_preserves_context_type_alignment_when_backend_reorders_ids() -> None:
+    connection = sqlite3.connect(":memory:")
+    storage = _FakeStorage()
+    repo = _make_repo(connection, storage)
+
+    base_time = datetime.datetime(2025, 1, 1, tzinfo=datetime.timezone.utc)
+    items: list[MultimodalContextItem] = []
+    for index, (text, ctx_type, modality) in enumerate(
+        [
+            ("audio-a", ContextType.ACTIVITY_CONTEXT, Modality.AUDIO),
+            ("frame-a", ContextType.STATE_CONTEXT, Modality.FRAME),
+            ("audio-b", ContextType.ACTIVITY_CONTEXT, Modality.AUDIO),
+            ("frame-b", ContextType.STATE_CONTEXT, Modality.FRAME),
+        ]
+    ):
+        context = _make_context(
+            text=text,
+            context_type=ctx_type,
+            create_time=base_time + datetime.timedelta(seconds=index),
+        )
+        items.append(
+            MultimodalContextItem(
+                context=context,
+                timeline_id="timeline-mixed",
+                modality=modality,
+                content_ref=f"segment-{index}",
+                embedding_ready=True,
+            )
+        )
+
+    persisted_ids = repo.upsert_aligned_segments(items)
+    assert persisted_ids and len(persisted_ids) == len(items)
+
+    rows = repo.fetch_by_timeline("timeline-mixed")
+    expected_mapping = {
+        item.context.id: item.context.extracted_data.context_type.value for item in items
+    }
+    for row in rows:
+        context_id = row["context_id"]
+        assert context_id in expected_mapping
+        assert row["context_type"] == expected_mapping[context_id]
 
 
 def test_upsert_updates_existing_record() -> None:

@@ -450,9 +450,10 @@ class ReportGenerator:
         Format a timestamp into a readable string.
         """
         try:
-            if timestamp:
-                dt = datetime.datetime.fromtimestamp(timestamp)
-                return dt.strftime("%Y-%m-%d %H:%M:%S")
-            return "Unknown time"
+            if not timestamp:
+                return "Unknown time"
+            dt = datetime.datetime.fromtimestamp(timestamp, tz=datetime.timezone.utc)
+            # Align with ISO-8601 strings emitted by stored contexts to avoid timezone drift.
+            return dt.isoformat().replace("+00:00", "Z")
         except (ValueError, OSError):
             return "Invalid time"

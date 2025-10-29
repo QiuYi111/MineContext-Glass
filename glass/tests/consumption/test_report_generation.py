@@ -180,3 +180,4 @@ def test_report_generator_prefers_glass_timeline(monkeypatch) -> None:
     user_message = captured_messages["messages"][1]["content"]
     assert "segment-two" in user_message
     assert "segment-one" in user_message
+    assert "Z" in user_message
