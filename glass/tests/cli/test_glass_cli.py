@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import datetime
 
+from pathlib import Path
+
+from glass.commands import TimelineRunResult
 from opencontext import cli
 
 
@@ -40,3 +43,24 @@ def test_resolve_report_window_fallback_lookback(monkeypatch) -> None:
 
     assert end_ts == int(reference.timestamp())
     assert end_ts - start_ts == 30 * 60
+
+
+def test_render_daily_report(tmp_path) -> None:
+    timeline_id = "25-01-foo-01-video"
+    report_file = tmp_path / f"{timeline_id}.md"
+    report_file.write_text("Daily content", encoding="utf-8")
+
+    result = TimelineRunResult(
+        timeline_id=timeline_id,
+        video_path=Path("/videos/foo.mp4"),
+        processed_contexts=3,
+        report_path=report_file,
+    )
+
+    aggregate = cli._render_daily_report([result], tmp_path, "25-01")
+
+    assert aggregate.exists()
+    content = aggregate.read_text(encoding="utf-8")
+    assert "Glass Daily Report - 25-01" in content
+    assert timeline_id in content
+    assert "Daily content" in content

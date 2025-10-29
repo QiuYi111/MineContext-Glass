@@ -12,15 +12,17 @@ import asyncio
 import sys
 import time
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
+from glass.commands import GlassBatchRunner, TimelineRunResult, discover_date_videos
 from opencontext.server.opencontext import OpenContext
 from opencontext.server.api import router as api_router
 from opencontext.config.config_manager import ConfigManager
@@ -223,15 +225,20 @@ def parse_args() -> argparse.Namespace:
         help="Frame sampling rate used during ingestion (default: 1.0 fps)",
     )
     glass_start_parser.add_argument(
-        "--whisper-model",
-        type=str,
-        default="tiny",
-        help="WhisperX model size used for transcription (default: tiny)",
+        "--lookback-minutes",
+        type=int,
+        default=120,
+        help="Report lookback window in minutes (default: 120)",
     )
     glass_start_parser.add_argument(
         "--timeline-prefix",
         type=str,
         help="Optional prefix applied to generated timeline IDs",
+    )
+    glass_start_parser.add_argument(
+        "--videos-root",
+        type=str,
+        help="Override the base videos directory (defaults to ./videos)",
     )
 
     return parser.parse_args()
@@ -396,6 +403,106 @@ def _handle_glass_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_glass_start(args: argparse.Namespace) -> int:
+    """Handle `opencontext glass start` command."""
+    try:
+        _ensure_storage_initialized()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Storage initialisation failed: %s", exc)
+        return 1
+
+    repo_root = Path.cwd()
+    videos_root = (
+        Path(args.videos_root).expanduser().resolve()
+        if getattr(args, "videos_root", None)
+        else repo_root / "videos"
+    )
+    date_token = args.date
+    date_dir = (videos_root / date_token).resolve()
+
+    try:
+        video_paths = discover_date_videos(date_dir)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to discover videos under %s: %s", date_dir, exc)
+        return 1
+
+    report_dir = (
+        Path(args.report_output).expanduser().resolve()
+        if getattr(args, "report_output", None)
+        else (repo_root / "persist" / "reports" / date_token)
+    )
+
+    try:
+        runner = GlassBatchRunner(
+            frame_rate=args.frame_rate,
+            report_lookback_minutes=args.lookback_minutes,
+        )
+        results = runner.run(
+            date_token=date_token,
+            video_paths=video_paths,
+            timeline_prefix=args.timeline_prefix,
+            report_dir=report_dir,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Glass start workflow failed: %s", exc)
+        return 1
+
+    if not results:
+        logger.warning("No video files processed for %s", date_token)
+        return 0
+
+    try:
+        aggregate_path = _render_daily_report(results, report_dir, date_token)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to compose daily report: %s", exc)
+        aggregate_path = None
+
+    for result in results:
+        logger.info(
+            "Timeline %s processed (%s contexts) from %s",
+            result.timeline_id,
+            result.processed_contexts,
+            result.video_path,
+        )
+        if result.report_path:
+            logger.info("  Report saved to %s", result.report_path)
+
+    if aggregate_path:
+        logger.info("Daily report saved to %s", aggregate_path)
+    return 0
+
+
+def _render_daily_report(
+    results: Sequence[TimelineRunResult],
+    report_dir: Path,
+    date_token: str,
+) -> Path:
+    """Compose a single Markdown file aggregating all timeline reports."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+    lines = [
+        f"# Glass Daily Report - {date_token}",
+        "",
+        f"_Generated at {timestamp}_",
+        "",
+    ]
+
+    for result in results:
+        lines.append(f"## Timeline: {result.timeline_id}")
+        lines.append(f"Source video: `{result.video_path.name}`")
+        lines.append("")
+        if result.report_path and result.report_path.exists():
+            content = result.report_path.read_text(encoding="utf-8")
+            lines.append(content)
+        else:
+            lines.append("_No report content produced for this timeline._")
+        lines.append("")
+
+    report_dir.mkdir(parents=True, exist_ok=True)
+    aggregate_path = report_dir / f"{date_token}-daily.md"
+    aggregate_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    return aggregate_path
+
+
 def handle_glass(args: argparse.Namespace) -> int:
     """Dispatch Glass sub-commands."""
     if not getattr(args, "glass_command", None):
@@ -404,6 +511,8 @@ def handle_glass(args: argparse.Namespace) -> int:
 
     if args.glass_command == "report":
         return _handle_glass_report(args)
+    if args.glass_command == "start":
+        return _handle_glass_start(args)
 
     logger.error("Unknown Glass sub-command: %s", args.glass_command)
     return 1

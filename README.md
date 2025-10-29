@@ -109,13 +109,18 @@ Glasses footage dropped into the configured import path will be processed automa
    export AUC_ACCESS_KEY=your-access-key
    ```
 
-2. Run the full-stack smoke test, which ingests the sample video, calls AUC Turbo, stores the manifest, and generates a report:
+2. Launch the production pipeline against a specific date folder. The new `glass`
+   entry point maps directly to the OpenContext CLI and processes everything under
+   `videos/<dd-mm>/`:
 
    ```bash
-   uv run python glass/scripts/glass_cli_smoke_test.py --run-id dev-smoke
+   uv run glass start dd-mm --config config/config.yaml
    ```
 
-   The script accepts overrides such as `--auc-app-key`, `--auc-access-key`, `--auc-resource-id`, and `--auc-model-name`. Outputs live under `persist/glass_cli_smoke/<run-id>/`.
+   Results are written to the unified storage configured by `CONTEXT_PATH`, and
+   timeline reports are collected under `persist/reports/dd-mm/`. Pass `--report-output`
+   to override the destination directory or `--lookback-minutes` to adjust the window
+   used for report generation.
 
 ### Generate Glass Reports
 

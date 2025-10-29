@@ -45,6 +45,7 @@ dependencies = [
 
 [project.scripts]
 opencontext = "opencontext.cli:main"
+glass = "glass.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/volcengine/MineContext"

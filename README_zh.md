@@ -116,13 +116,13 @@ uv run opencontext start --port 8000 --config config/config.yaml
    export AUC_ACCESS_KEY=你的AccessKey
    ```
 
-2. 运行 `glass/scripts/glass_cli_smoke_test.py`，一次性完成 ffmpeg 处理、火山极速识别转写、时间线写入与报告生成：
+2. 使用新的 `glass` CLI 将某个日期目录下的所有素材送入正式管线：
 
    ```bash
-   uv run python glass/scripts/glass_cli_smoke_test.py --run-id dev-smoke
+   uv run glass start dd-mm --config config/config.yaml
    ```
 
-   可按需覆盖 `--auc-app-key`、`--auc-access-key`、`--auc-resource-id`、`--auc-model-name` 等参数。所有产物会写入 `persist/glass_cli_smoke/<run-id>/`，便于回溯。
+   命令会遍历 `videos/dd-mm/`，执行抽帧、极速识别、上下文入库，并在 `persist/reports/dd-mm/` 生成 Markdown 日报。可通过 `--report-output` 指定输出目录、`--lookback-minutes` 调整日报取数窗口。
 
 脚本失败时请根据提示的 HTTP 状态码与 `request_id` 排查，常见处理方式详见 `glass/new_auc.md`。
 
