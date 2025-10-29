@@ -41,6 +41,8 @@ dependencies = [
     "pillow",
     "imagehash",
     "requests",
+    "markdown-it-py",
+    "bleach",
 ]
 
 [project.scripts]

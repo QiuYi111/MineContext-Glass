@@ -175,6 +175,7 @@ class SQLiteBackend(IDocumentStorageBackend):
                 content_ref TEXT NOT NULL,
                 embedding_ready BOOLEAN DEFAULT 0,
                 context_type TEXT,
+                auto_summary_json TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(context_id)
@@ -213,6 +214,24 @@ class SQLiteBackend(IDocumentStorageBackend):
                 ADD COLUMN context_type TEXT
                 '''
             )
+        if 'auto_summary_json' not in columns:
+            cursor.execute(
+                '''
+                ALTER TABLE glass_multimodal_context
+                ADD COLUMN auto_summary_json TEXT
+                '''
+            )
+
+        cursor.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS glass_daily_reports (
+                timeline_id TEXT PRIMARY KEY,
+                manual_markdown TEXT,
+                manual_metadata TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            '''
+        )
 
     def _insert_default_vault_document(self):
         """Insert default Quick Start document"""

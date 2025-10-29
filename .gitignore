@@ -16,3 +16,5 @@ __pycache__
 .venv/
 uv.lock
 /config/config.yaml
+glass/webui/node_modules/
+glass/webui/dist/

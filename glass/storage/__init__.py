@@ -1,4 +1,4 @@
-from .context_repository import GlassContextRepository
+from .context_repository import DailyReportRecord, GlassContextRepository
 from .models import Modality, MultimodalContextItem
 
-__all__ = ["GlassContextRepository", "Modality", "MultimodalContextItem"]
+__all__ = ["GlassContextRepository", "DailyReportRecord", "Modality", "MultimodalContextItem"]

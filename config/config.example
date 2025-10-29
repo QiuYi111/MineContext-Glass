@@ -86,7 +86,7 @@ processing:
 
   # Glass timeline processor configuration
   glass_timeline_processor:
-    enabled: false
+    enabled: true
 
   # Context merger configuration
   context_merger:
@@ -191,6 +191,12 @@ prompts:
 
 # Glass ingestion configuration
 glass:
+  uploads:
+    max_size_mb: 2048
+    allowed_types:
+      - "video/mp4"
+      - "video/quicktime"
+    max_concurrent: 2
   speech_to_text:
     provider: auc_turbo
     auc_turbo:

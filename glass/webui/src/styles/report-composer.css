@@ -1,0 +1,141 @@
+.report-composer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.report-composer__pane {
+  background: rgba(15, 23, 42, 0.32);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 22px;
+  padding: 26px;
+  backdrop-filter: blur(22px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.45);
+}
+
+.report-composer__pane header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.report-composer__pane h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.report-composer__pane p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: rgba(148, 163, 184, 0.75);
+}
+
+.report-composer__actions {
+  display: flex;
+  gap: 12px;
+}
+
+.button {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.button.primary {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.9), rgba(37, 99, 235, 0.8));
+  color: #f8fafc;
+  box-shadow: 0 18px 36px rgba(59, 130, 246, 0.32);
+}
+
+.button.primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 22px 48px rgba(59, 130, 246, 0.38);
+}
+
+.button.primary:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.button.ghost {
+  background: rgba(15, 23, 42, 0.24);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.button.ghost:hover {
+  transform: translateY(-2px);
+}
+
+.report-composer__editor {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 280px;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.4);
+  color: #f8fafc;
+  padding: 20px;
+  resize: vertical;
+  transition: border 0.2s ease, box-shadow 0.2s ease;
+}
+
+.report-composer__editor:focus {
+  outline: none;
+  border-color: rgba(59, 130, 246, 0.6);
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.28);
+}
+
+.report-composer__markdown {
+  font-size: 15px;
+  line-height: 1.78;
+  color: rgba(226, 232, 240, 0.94);
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+}
+
+.report-composer__markdown h1,
+.report-composer__markdown h2,
+.report-composer__markdown h3 {
+  color: #f8fafc;
+  text-transform: none;
+  letter-spacing: -0.015em;
+}
+
+.report-composer__markdown ul {
+  padding-left: 20px;
+}
+
+.report-composer__markdown code {
+  background: rgba(15, 23, 42, 0.6);
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+@media (max-width: 1024px) {
+  .report-composer__actions {
+    flex-direction: column;
+    width: 100%;
+  }
+  .button {
+    width: 100%;
+    justify-content: center;
+  }
+}

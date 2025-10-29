@@ -1,0 +1,68 @@
+.visual-mosaic {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: rgba(15, 23, 42, 0.32);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 22px;
+  padding: 26px;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.visual-mosaic header {
+  display: flex;
+  justify-content: space-between;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 15px;
+  color: rgba(148, 163, 184, 0.8);
+}
+
+.visual-mosaic header span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.2);
+}
+
+.visual-mosaic__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.visual-mosaic__empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 36px 18px;
+  color: rgba(148, 163, 184, 0.75);
+}
+
+.visual-mosaic__frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(59, 130, 246, 0.16);
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.visual-mosaic__frame img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+.visual-mosaic__frame figcaption {
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.visual-mosaic__frame figcaption small {
+  color: rgba(148, 163, 184, 0.7);
+  font-size: 12px;
+}

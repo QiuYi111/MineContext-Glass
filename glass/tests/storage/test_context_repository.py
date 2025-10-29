@@ -29,7 +29,18 @@ def _bootstrap_schema(connection: sqlite3.Connection) -> None:
             content_ref TEXT NOT NULL,
             embedding_ready BOOLEAN DEFAULT 0,
             context_type TEXT,
+            auto_summary_json TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE glass_daily_reports (
+            timeline_id TEXT PRIMARY KEY,
+            manual_markdown TEXT,
+            manual_metadata TEXT,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -286,3 +297,26 @@ def test_load_envelope_recovers_contexts_sorted_by_segment() -> None:
     assert envelope.timeline_id == "timeline-42"
     assert envelope.source == "videos/sample.mp4"
     assert [item.context.id for item in envelope.items] == [frame_context.id, audio_context.id]
+
+
+def test_daily_report_roundtrip() -> None:
+    connection = sqlite3.connect(":memory:")
+    storage = _FakeStorage()
+    repo = _make_repo(connection, storage)
+
+    timeline_id = "timeline-daily-report"
+    assert repo.load_daily_report_record(timeline_id) is None
+
+    record = repo.upsert_daily_report(
+        timeline_id=timeline_id,
+        manual_markdown="# Report\n\nSummary.",
+        manual_metadata={"pinned": ["ctx-1"]},
+    )
+    assert record.manual_markdown.startswith("# Report")
+    assert record.manual_metadata["pinned"] == ["ctx-1"]
+    assert record.updated_at is not None
+
+    fetched = repo.load_daily_report_record(timeline_id)
+    assert fetched is not None
+    assert fetched.manual_markdown == record.manual_markdown
+    assert fetched.manual_metadata == record.manual_metadata
