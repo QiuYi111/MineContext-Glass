@@ -5,29 +5,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-
-def _wait_for_completion(client: TestClient, timeline_id: str, *, timeout: float = 5.0) -> None:
-    import time
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        response = client.get(f"/glass/status/{timeline_id}")
-        assert response.status_code == 200
-        status = response.json()["data"]["status"]
-        if status == "completed":
-            return
-        if status == "failed":
-            raise AssertionError("ingestion failed unexpectedly")
-        time.sleep(0.1)
-    raise AssertionError("timeline did not reach completed status in time")
-
 from glass.webui.backend.app import create_app
 from glass.webui.backend.config import BackendConfig, UploadLimits
 
 
-def _make_config(tmp_dir: Path) -> BackendConfig:
+def _make_config(tmp_dir: Path, *, mode: str = "demo") -> BackendConfig:
     config = BackendConfig(
-        mode="demo",
+        mode=mode,
         upload_dir=tmp_dir / "uploads",
         state_db_path=tmp_dir / "state.db",
         storage_base_dir=tmp_dir / "storage",
@@ -49,9 +33,24 @@ def test_demo_seed_is_available(tmp_path: Path) -> None:
     data = response.json()["data"]
     assert data["timeline_id"] == "demo-timeline-001"
     assert data["highlights"]
+    status = client.get("/glass/status/demo-timeline-001")
+    assert status.status_code == 200
+    assert status.json()["data"]["status"] == "completed"
 
 
-def test_upload_flow_creates_timeline(tmp_path: Path) -> None:
+def test_demo_context_payload_contains_items(tmp_path: Path) -> None:
+    app = create_app(_make_config(tmp_path))
+    client = TestClient(app)
+
+    response = client.get("/glass/context/demo-timeline-001")
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert payload["timeline_id"] == "demo-timeline-001"
+    assert payload["items"]
+    assert payload["daily_report"]["timeline_id"] == "demo-timeline-001"
+
+
+def test_demo_mode_blocks_uploads(tmp_path: Path) -> None:
     app = create_app(_make_config(tmp_path))
     client = TestClient(app)
 
@@ -59,29 +58,15 @@ def test_upload_flow_creates_timeline(tmp_path: Path) -> None:
         "/glass/upload",
         files={"file": ("sample.mp4", io.BytesIO(b"demo-bytes"), "video/mp4")},
     )
-    assert response.status_code == 200
-    payload = response.json()["data"]
-    timeline_id = payload["timeline_id"]
-    assert timeline_id
-    _wait_for_completion(client, timeline_id)
-
-    report_response = client.get(f"/glass/report/{timeline_id}")
-    assert report_response.status_code == 200
-    report = report_response.json()["data"]
-    assert report["timeline_id"] == timeline_id
-    assert report["auto_markdown"]
+    assert response.status_code == 403
+    assert "disabled" in response.json()["detail"]
 
 
 def test_manual_report_update(tmp_path: Path) -> None:
     app = create_app(_make_config(tmp_path))
     client = TestClient(app)
 
-    upload = client.post(
-        "/glass/upload",
-        files={"file": ("sample.mp4", io.BytesIO(b"data"), "video/mp4")},
-    )
-    timeline_id = upload.json()["data"]["timeline_id"]
-    _wait_for_completion(client, timeline_id)
+    timeline_id = "demo-timeline-001"
 
     update = client.put(
         f"/glass/report/{timeline_id}",
@@ -98,3 +83,8 @@ def test_manual_report_update(tmp_path: Path) -> None:
     regenerate = client.post(f"/glass/report/{timeline_id}/generate")
     assert regenerate.status_code == 200
     assert regenerate.json()["data"]["status"] == "queued"
+
+    final_report = client.get(f"/glass/report/{timeline_id}")
+    assert final_report.status_code == 200
+    payload = final_report.json()["data"]
+    assert payload["manual_markdown"] is None

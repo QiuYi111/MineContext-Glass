@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import threading
-from datetime import datetime, timezone
 from concurrent.futures import Future
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO, Optional
 
@@ -15,10 +15,8 @@ from glass.reports.service import DailyReportService
 from glass.storage.context_repository import GlassContextRepository
 
 from ..config import BackendConfig
-from ..models import TimelineRecord, UploadStatus
-from ..repositories import TimelineRepository
+from ..models import UploadStatus
 from ..state import UploadTask, UploadTaskRepository
-from .reports import DailyReportBuilder
 
 CHUNK_SIZE = 1024 * 1024
 
@@ -39,19 +37,15 @@ class IngestionCoordinator:
         *,
         config: BackendConfig,
         tasks: UploadTaskRepository,
-        ingestion_service: GlassIngestionService,
+        ingestion_service: GlassIngestionService | None,
         context_repository: GlassContextRepository | None = None,
         report_service: DailyReportService | None = None,
-        legacy_repository: TimelineRepository | None = None,
-        legacy_report_builder: DailyReportBuilder | None = None,
     ) -> None:
         self._config = config
         self._tasks = tasks
         self._ingestion = ingestion_service
         self._context_repository = context_repository
         self._report_service = report_service
-        self._legacy_repository = legacy_repository
-        self._legacy_report_builder = legacy_report_builder
         self._lock = threading.RLock()
         self._futures: dict[str, Future[None]] = {}
 
@@ -67,6 +61,9 @@ class IngestionCoordinator:
         content_length: Optional[int] = None,
     ) -> UploadTask:
         """Persist an upload to disk and register a new ingestion task."""
+        if self._config.is_demo or self._ingestion is None:
+            raise RuntimeError("Uploads are disabled while running in demo mode.")
+
         self._validate_upload(filename=filename, content_length=content_length)
         destination = self._allocate_destination(filename)
         size = self._write_stream(file_obj, destination)
@@ -79,8 +76,6 @@ class IngestionCoordinator:
             status=UploadStatus.PROCESSING,
             size_bytes=size,
         )
-        if self._config.is_demo:
-            self._seed_legacy_record(task)
 
         try:
             submitted_id = self._ingestion.submit(destination, timeline_id=timeline_id)
@@ -105,7 +100,7 @@ class IngestionCoordinator:
         if task is None:
             raise KeyError(timeline_id)
 
-        if task.status in (UploadStatus.COMPLETED, UploadStatus.FAILED):
+        if task.status in (UploadStatus.COMPLETED, UploadStatus.FAILED) or self._ingestion is None:
             return task.status
 
         try:
@@ -127,39 +122,24 @@ class IngestionCoordinator:
 
     def get_daily_report(self, timeline_id: str):
         envelope = self._load_envelope(timeline_id)
-        if envelope is not None and self._report_service:
-            try:
-                report = self._report_service.get_report(timeline_id, envelope=envelope)
-            except ValueError as exc:  # envelope exists but contexts not ready
-                raise ReportNotReadyError(str(exc)) from exc
-            if self._config.is_demo:
-                self._sync_legacy_auto_report(timeline_id, report=report)
-            return report
+        if envelope is None or not self._report_service:
+            task = self._tasks.get(timeline_id)
+            if task and task.status is not UploadStatus.COMPLETED:
+                raise ReportNotReadyError(timeline_id)
+            raise KeyError(timeline_id)
 
-        if self._config.is_demo:
-            record = self._get_legacy_record(timeline_id)
-            if record is not None:
-                if record.status is not UploadStatus.COMPLETED and self._legacy_report_builder:
-                    record.status = UploadStatus.COMPLETED
-                    report = self._legacy_report_builder.build_auto_report(record)
-                    record.rendered_html = report.rendered_html
-                    self._legacy_repository.upsert(record)
-                return record.build_daily_report()
-
-        task = self._tasks.get(timeline_id)
-        if task and task.status is not UploadStatus.COMPLETED:
-            raise ReportNotReadyError(timeline_id)
-        raise KeyError(timeline_id)
+        try:
+            return self._report_service.get_report(timeline_id, envelope=envelope)
+        except ValueError as exc:
+            raise ReportNotReadyError(str(exc)) from exc
 
     def save_manual_report(self, timeline_id: str, *, markdown: str, metadata: dict[str, object]):
         envelope = self._load_envelope(timeline_id)
         if envelope is None or not self._report_service:
-            if self._config.is_demo:
-                return self._save_legacy_manual_report(timeline_id, markdown=markdown, metadata=metadata)
             raise ReportNotReadyError(timeline_id)
 
         try:
-            report = self._report_service.save_manual_report(
+            return self._report_service.save_manual_report(
                 timeline_id=timeline_id,
                 manual_markdown=markdown,
                 manual_metadata=metadata,
@@ -168,31 +148,10 @@ class IngestionCoordinator:
         except ValueError as exc:
             raise ReportNotReadyError(str(exc)) from exc
 
-        if self._config.is_demo:
-            self._sync_legacy_manual_report(timeline_id, markdown=markdown, metadata=metadata)
-        return report
-
-    def regenerate_report(self, timeline_id: str) -> TimelineRecord:
-        if self._context_repository and not self._config.is_demo:
-            task = self._tasks.get(timeline_id)
-            if task is None:
-                raise KeyError(timeline_id)
-            # In real mode we do not re-run ingestion yet; clearing manual overrides keeps responses consistent.
-            self._clear_manual_report(timeline_id)
-            return TimelineRecord(
-                timeline_id=timeline_id,
-                filename=task.filename,
-                source_path=task.source_path,
-                status=self.get_status(timeline_id),
-            )
-
-        if not self._legacy_repository:
+    def regenerate_report(self, timeline_id: str) -> None:
+        if self._tasks.get(timeline_id) is None:
             raise KeyError(timeline_id)
-        record = self._legacy_repository.get(timeline_id)
-        if not record:
-            raise KeyError(timeline_id)
-        self._register_future(timeline_id)
-        return record
+        self._clear_manual_report(timeline_id)
 
     def build_context_payload(self, timeline_id: str) -> dict[str, Any]:
         task = self._tasks.get(timeline_id)
@@ -200,14 +159,7 @@ class IngestionCoordinator:
             raise KeyError(timeline_id)
 
         envelope = self._load_envelope(timeline_id)
-        if envelope is None:
-            if self._config.is_demo:
-                legacy = self._get_legacy_record(timeline_id)
-                if legacy and legacy.status is UploadStatus.COMPLETED:
-                    return self._build_legacy_context_payload(timeline_id, legacy)
-            raise ReportNotReadyError(timeline_id)
-
-        if not self._report_service:
+        if envelope is None or not self._report_service:
             raise ReportNotReadyError(timeline_id)
 
         try:
@@ -245,6 +197,8 @@ class IngestionCoordinator:
         }
 
     def _register_future(self, timeline_id: str) -> None:
+        if not self._ingestion:
+            return
         tasks_map = getattr(self._ingestion, "_tasks", None)
         if not isinstance(tasks_map, dict):
             return
@@ -267,99 +221,10 @@ class IngestionCoordinator:
 
         future.add_done_callback(_callback)
 
-    def _seed_legacy_record(self, task: UploadTask) -> None:
-        if not self._legacy_repository:
-            return
-
-        record = TimelineRecord(
-            timeline_id=task.timeline_id,
-            filename=task.filename,
-            source_path=task.source_path,
-            status=UploadStatus.PROCESSING,
-        )
-        self._legacy_repository.upsert(record)
-
-    def _sync_legacy_manual_report(self, timeline_id: str, *, markdown: str, metadata: dict[str, object]) -> None:
-        if not self._legacy_repository:
-            return
-        record = self._legacy_repository.save_manual_report(
-            timeline_id,
-            manual_markdown=markdown,
-            manual_metadata=metadata,
-        )
-        if self._legacy_report_builder:
-            record.rendered_html = self._legacy_report_builder.renderer.render(markdown)
-            self._legacy_repository.upsert(record)
-
-    def _get_legacy_record(self, timeline_id: str) -> TimelineRecord | None:
-        if not self._legacy_repository:
-            return None
-        return self._legacy_repository.get(timeline_id)
-
     def _load_envelope(self, timeline_id: str):
         if not self._context_repository:
             return None
         return self._context_repository.load_envelope(timeline_id)
-
-    def _sync_legacy_auto_report(self, timeline_id: str, *, report) -> None:
-        if not self._legacy_repository or not self._legacy_report_builder:
-            return
-        record = self._legacy_repository.get(timeline_id)
-        if record is None:
-            record = TimelineRecord(
-                timeline_id=timeline_id,
-                filename=report.source,
-                source_path=Path(report.source),
-                status=UploadStatus.COMPLETED,
-            )
-        record.auto_markdown = report.auto_markdown
-        record.manual_markdown = report.manual_markdown
-        record.manual_metadata = report.manual_metadata
-        record.highlights = report.highlights
-        record.visual_cards = report.visual_cards
-        record.rendered_html = report.rendered_html
-        record.status = UploadStatus.COMPLETED
-        self._legacy_repository.upsert(record)
-
-    def _save_legacy_manual_report(self, timeline_id: str, *, markdown: str, metadata: dict[str, object]):
-        record = self._legacy_repository.save_manual_report(
-            timeline_id,
-            manual_markdown=markdown,
-            manual_metadata=metadata,
-        )
-        if self._legacy_report_builder:
-            record.rendered_html = self._legacy_report_builder.renderer.render(
-                record.manual_markdown or record.auto_markdown
-            )
-            self._legacy_repository.upsert(record)
-        return record.build_daily_report()
-
-    def _build_legacy_context_payload(self, timeline_id: str, record: TimelineRecord) -> dict[str, Any]:
-        daily_report = record.build_daily_report()
-        items: list[dict[str, Any]] = []
-        for highlight in daily_report.highlights:
-            items.append(
-                {
-                    "context_id": highlight.context_id,
-                    "modality": highlight.modality,
-                    "content_ref": highlight.thumbnail_url,
-                    "summary": (highlight.summary or highlight.title or ""),
-                    "metadata": {
-                        "segment_start": highlight.segment_start,
-                        "segment_end": highlight.segment_end,
-                    },
-                }
-            )
-        return {
-            "timeline_id": timeline_id,
-            "source": record.filename,
-            "items": items,
-            "daily_report": daily_report.model_dump(),
-            "summary": "",
-            "highlights": [highlight.model_dump() for highlight in daily_report.highlights],
-            "visual_cards": [card.model_dump() for card in daily_report.visual_cards],
-            "auto_markdown": daily_report.auto_markdown,
-        }
 
     def _clear_manual_report(self, timeline_id: str) -> None:
         if not self._context_repository:
@@ -396,16 +261,19 @@ class IngestionCoordinator:
             raise ValueError("file too large")
 
     def _allocate_destination(self, filename: str) -> Path:
-        try:
-            return self._ingestion.allocate_upload_path(filename)
-        except AttributeError:
-            safe_name = Path(filename).name or "upload.bin"
-            destination = self._config.upload_dir / safe_name
-            counter = 1
-            while destination.exists():
-                destination = self._config.upload_dir / f"{counter}_{safe_name}"
-                counter += 1
-            return destination
+        if self._ingestion and hasattr(self._ingestion, "allocate_upload_path"):
+            try:
+                return self._ingestion.allocate_upload_path(filename)
+            except AttributeError:
+                pass
+
+        safe_name = Path(filename).name or "upload.bin"
+        destination = self._config.upload_dir / safe_name
+        counter = 1
+        while destination.exists():
+            destination = self._config.upload_dir / f"{counter}_{safe_name}"
+            counter += 1
+        return destination
 
     @staticmethod
     def _write_stream(source: BinaryIO, destination: Path) -> int:

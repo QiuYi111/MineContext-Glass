@@ -20,9 +20,8 @@ from glass.storage.context_repository import GlassContextRepository
 from opencontext.managers.processor_manager import ContextProcessorManager
 
 from .config import BackendConfig, load_config
-from .demo_data import load_demo_timelines
-from .repositories import TimelineRepository
-from .services import DailyReportBuilder, IngestionCoordinator, MarkdownRenderer
+from .demo_data import load_demo_snapshot
+from .services import IngestionCoordinator
 from .services.ingestion import ReportNotReadyError
 from .state import UploadTaskRepository
 
@@ -39,13 +38,21 @@ def create_app(
 
     config = config or load_config()
     tasks = tasks_repository or UploadTaskRepository(config.state_db_path)
-    context_repo = context_repository or GlassContextRepository()
-    report_srv = report_service or DailyReportService(repository=context_repo)
-    legacy_repository = TimelineRepository()
-    renderer = MarkdownRenderer()
-    report_builder = DailyReportBuilder(renderer=renderer)
+    if context_repository is not None:
+        context_repo = context_repository
+    elif config.is_demo:
+        context_repo = load_demo_snapshot(config.demo_data_dir, tasks=tasks)
+    else:
+        context_repo = GlassContextRepository()
 
-    ingestion = ingestion_service or _build_ingestion_service(config, context_repo)
+    report_srv = report_service or DailyReportService(repository=context_repo)
+
+    if ingestion_service is not None:
+        ingestion = ingestion_service
+    elif config.is_demo:
+        ingestion = None
+    else:
+        ingestion = _build_ingestion_service(config, context_repo)
 
     coordinator = IngestionCoordinator(
         config=config,
@@ -53,17 +60,7 @@ def create_app(
         ingestion_service=ingestion,
         context_repository=context_repo,
         report_service=report_srv,
-        legacy_repository=legacy_repository,
-        legacy_report_builder=report_builder,
     )
-
-    if config.is_demo:
-        load_demo_timelines(
-            config.demo_data_dir,
-            repository=legacy_repository,
-            report_builder=report_builder,
-            tasks=tasks,
-        )
 
     app = FastAPI(
         title="Glass WebUI Backend",
@@ -80,10 +77,11 @@ def create_app(
     )
 
     app.state.config = config
-    app.state.repository = legacy_repository
+    app.state.context_repository = context_repo
     app.state.tasks = tasks
     app.state.coordinator = coordinator
     app.state.ingestion_service = ingestion
+    app.state.report_service = report_srv
 
     @app.on_event("shutdown")
     async def _shutdown() -> None:
@@ -130,6 +128,8 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except TimelineNotFoundError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         finally:
             await file.close()
 

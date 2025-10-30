@@ -24,10 +24,14 @@ from glass.webui.backend.state import UploadTaskRepository
 
 class _StubIngestionService:
     def __init__(self) -> None:
-        self._tasks = {}
+        self._tasks: dict[str, object] = {}
 
     def get_status(self, timeline_id: str) -> IngestionStatus:
         return IngestionStatus.COMPLETED
+
+    def submit(self, source_path: Path, *, timeline_id: str | None = None) -> str:
+        return timeline_id or "stub-timeline"
+
 
 
 class _StubContextRepository:
@@ -215,8 +219,7 @@ def test_save_manual_report_requires_envelope(tmp_path) -> None:
     repository.clear_daily_report(timeline_id)
     assert repository.cleared is True
 
-    result = coordinator.regenerate_report(timeline_id)
-    assert result.timeline_id == timeline_id
+    coordinator.regenerate_report(timeline_id)
     assert repository.cleared is True
 
 

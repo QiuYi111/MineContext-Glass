@@ -1,105 +1,24 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Optional
 
-from glass.reports.models import TimelineHighlight, VisualCard
-
-from .models import TimelineRecord, UploadStatus
-from .repositories import TimelineRepository
-from .services.reports import DailyReportBuilder
-from .state import UploadTask, UploadTaskRepository
+from .snapshot import SnapshotContextRepository, load_snapshot, seed_upload_tasks
+from .state import UploadTaskRepository
 
 
-def load_demo_timelines(
+def load_demo_snapshot(
     directory: Path,
     *,
-    repository: TimelineRepository,
-    report_builder: DailyReportBuilder,
-    tasks: UploadTaskRepository | None = None,
-) -> None:
-    """Seed the repository with demo timelines defined in JSON files."""
-    if not directory.exists():
-        return
+    tasks: Optional[UploadTaskRepository] = None,
+) -> SnapshotContextRepository:
+    """
+    Load pre-exported snapshot payloads for demo mode.
 
-    for path in sorted(directory.glob("*.json")):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[glass.webui.backend] Failed to load demo data {path}: {exc}")
-            continue
-
-        for entry in _iter_timelines(payload):
-            record = _build_record(entry)
-            repository.upsert(record)
-            if record.status is UploadStatus.COMPLETED:
-                report_builder.build_auto_report(record)
-                repository.upsert(record)
-            if tasks:
-                tasks.upsert(
-                    UploadTask(
-                        timeline_id=record.timeline_id,
-                        filename=record.filename,
-                        source_path=record.source_path,
-                        status=record.status,
-                        submitted_at=record.submitted_at,
-                        updated_at=record.completed_at or record.submitted_at,
-                        completed_at=record.completed_at,
-                    )
-                )
-
-
-def _iter_timelines(payload: Any) -> Iterable[dict[str, Any]]:
-    if isinstance(payload, dict):
-        entries = payload.get("timelines") or []
-    else:
-        entries = payload or []
-    for entry in entries:
-        if isinstance(entry, dict):
-            yield entry
-
-
-def _build_record(data: dict[str, Any]) -> TimelineRecord:
-    timeline_id = data.get("timeline_id") or data.get("id") or "demo-timeline"
-    filename = data.get("filename") or data.get("source") or "demo.mp4"
-    source_path = Path(data.get("source_path") or filename)
-
-    submitted_at = _parse_datetime(data.get("submitted_at")) or datetime.now(timezone.utc)
-    completed_at = _parse_datetime(data.get("completed_at"))
-
-    highlights = [TimelineHighlight(**entry) for entry in data.get("highlights", []) if isinstance(entry, dict)]
-    visual_cards = [VisualCard(**entry) for entry in data.get("visual_cards", []) if isinstance(entry, dict)]
-
-    status_value = data.get("status") or "completed"
-    try:
-        status = UploadStatus(status_value)
-    except ValueError:
-        status = UploadStatus.COMPLETED
-
-    return TimelineRecord(
-        timeline_id=timeline_id,
-        filename=filename,
-        source_path=source_path,
-        status=status,
-        submitted_at=submitted_at,
-        completed_at=completed_at,
-        auto_markdown=data.get("auto_markdown"),
-        manual_markdown=data.get("manual_markdown"),
-        manual_metadata=data.get("manual_metadata") or {},
-        highlights=highlights,
-        visual_cards=visual_cards,
-        rendered_html=data.get("rendered_html"),
-    )
-
-
-def _parse_datetime(value: Any):
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(value)
-    except Exception:  # noqa: BLE001
-        return None
+    The snapshot is expected to resemble the output of scripts/export_glass_snapshot.py.
+    """
+    timelines = load_snapshot(directory)
+    repository = SnapshotContextRepository(timelines)
+    if tasks:
+        seed_upload_tasks(tasks, timelines.values())
+    return repository

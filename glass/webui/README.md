@@ -46,9 +46,15 @@ GLASS_BACKEND_UPLOAD_DIR="$(pwd)/persist/glass/uploads" \
 uv run uvicorn glass.webui.backend.app:app --port 9000
 ```
 
-- Demo 数据存放在 `glass/webui/backend/demo_data/`，默认自动载入。
+- Demo 模式从 `glass/webui/backend/demo_data/` 目录下的快照载入数据；使用 `scripts/export_glass_snapshot.py` 可将真实流水线产出的上下文导出成该格式：
+
+```bash
+uv run python scripts/export_glass_snapshot.py --output glass/webui/backend/demo_data/latest.json --pretty
+```
+
+- `GLASS_BACKEND_MODE=demo` 提供只读体验（禁用上传与再处理）；切换到 `GLASS_BACKEND_MODE=real` 时，需要先通过 `opencontext glass start` 等 CLI 初始化存储，之后上传会触发真实流水线。
 - 上传限制可通过 `GLASS_UPLOAD_MAX_SIZE_MB`、`GLASS_UPLOAD_ALLOWED_TYPES` 等环境变量覆盖。
-- 运行 `uv run pytest glass/webui/backend/tests/test_app.py -q` 可验证 REST 契约。
+- 运行 `uv run pytest glass/webui/backend/tests -q` 可验证后端契约与快照加载逻辑。
 
 ## 部署
 
