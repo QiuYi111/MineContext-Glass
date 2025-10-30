@@ -153,6 +153,7 @@ def get_context(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     payload = envelope.model_dump()
+    payload["summary"] = report_service.build_summary(report)
     payload["daily_report"] = report
     payload["highlights"] = report.highlights
     payload["visual_cards"] = report.visual_cards

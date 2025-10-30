@@ -61,11 +61,13 @@ class _StubRepository:
         timeline_id: str,
         manual_markdown: str | None,
         manual_metadata: dict | None = None,
+        rendered_html: str | None = None,
     ) -> DailyReportRecord:
         record = DailyReportRecord(
             timeline_id=timeline_id,
             manual_markdown=manual_markdown,
             manual_metadata=manual_metadata or {},
+            rendered_html=rendered_html,
             updated_at=dt.datetime.now(dt.timezone.utc),
         )
         self._reports[timeline_id] = record
@@ -167,6 +169,8 @@ def test_context_endpoint_serializes_envelope(tmp_path: Path) -> None:
     assert "daily_report" in data
     assert data["highlights"], "highlights should be derived from contexts"
     assert data["daily_report"]["auto_markdown"]
+    assert data["summary"], "summary should provide a condensed view"
+    assert "thumbnail_url" in data["highlights"][0]
 
 
 def test_report_endpoints_support_manual_updates(tmp_path: Path) -> None:

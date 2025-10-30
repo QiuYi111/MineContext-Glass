@@ -64,7 +64,12 @@ class DailyReportService:
         updated_at = manual_record.updated_at if manual_record else None
 
         chosen_markdown = manual_markdown or auto_markdown
-        rendered_html = self._render_markdown(chosen_markdown) if chosen_markdown else None
+        if manual_record and manual_record.rendered_html:
+            rendered_html = manual_record.rendered_html
+        elif chosen_markdown:
+            rendered_html = self._render_markdown(chosen_markdown)
+        else:
+            rendered_html = None
 
         return DailyReport(
             timeline_id=envelope.timeline_id,
@@ -86,10 +91,12 @@ class DailyReportService:
         manual_metadata: Optional[dict] = None,
         envelope: ContextEnvelope | None = None,
     ) -> DailyReport:
+        rendered_html = self._render_markdown(manual_markdown)
         record = self._repository.upsert_daily_report(
             timeline_id=timeline_id,
             manual_markdown=manual_markdown,
             manual_metadata=manual_metadata or {},
+            rendered_html=rendered_html,
         )
         envelope = envelope or self._repository.load_envelope(timeline_id)
         if envelope is None:
@@ -98,7 +105,7 @@ class DailyReportService:
         highlights = self._build_highlights(envelope)
         visual_cards = self._build_visual_cards(envelope)
         auto_markdown = self._build_auto_markdown(envelope, highlights=highlights)
-        rendered_html = self._render_markdown(record.manual_markdown or auto_markdown or "")
+        rendered_html = record.rendered_html or self._render_markdown(record.manual_markdown or auto_markdown or "")
 
         return DailyReport(
             timeline_id=envelope.timeline_id,
@@ -126,6 +133,12 @@ class DailyReportService:
                 continue
 
             title = self._derive_title(item, summary=summary)
+            thumbnail_url: str | None = None
+            if item.modality is Modality.FRAME:
+                thumbnail_url = item.content_ref
+            else:
+                thumbnail_url = (item.context.metadata or {}).get("thumbnail_url")
+
             highlight = TimelineHighlight(
                 title=title,
                 summary=summary or None,
@@ -134,6 +147,7 @@ class DailyReportService:
                 segment_start=_safe_float(metadata.get("segment_start")),
                 segment_end=_safe_float(metadata.get("segment_end")),
                 context_id=item.context.id,
+                thumbnail_url=thumbnail_url,
             )
             candidates.append(highlight)
 
@@ -159,6 +173,30 @@ class DailyReportService:
 
         cards.sort(key=lambda c: (c.segment_end or 0.0, c.segment_start or 0.0), reverse=True)
         return cards[:limit]
+
+    @staticmethod
+    def build_summary(report: DailyReport, *, max_items: int = 3) -> str:
+        """Derive a concise summary string from highlight content or auto markdown."""
+        snippets: List[str] = []
+        for highlight in report.highlights:
+            text = (highlight.summary or highlight.title or "").strip()
+            if text:
+                snippets.append(text)
+            if len(snippets) >= max_items:
+                break
+
+        if not snippets and report.auto_markdown:
+            for line in report.auto_markdown.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                if stripped.startswith("#") or stripped.startswith("- Timeline"):
+                    continue
+                snippets.append(stripped)
+                if len(snippets) >= max_items:
+                    break
+
+        return " / ".join(snippets)
 
     def _build_auto_markdown(
         self,

@@ -19,6 +19,7 @@ class TimelineHighlight(BaseModel):
     segment_start: Optional[float] = Field(None, description="Segment start in seconds.")
     segment_end: Optional[float] = Field(None, description="Segment end in seconds.")
     context_id: Optional[str] = Field(None, description="ProcessedContext identifier backing the highlight.")
+    thumbnail_url: Optional[str] = Field(None, description="Preview image representing the highlight when available.")
 
 
 class VisualCard(BaseModel):

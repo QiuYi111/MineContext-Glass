@@ -79,11 +79,13 @@ class _StubRepository:
         timeline_id: str,
         manual_markdown: str | None,
         manual_metadata: dict | None = None,
+        rendered_html: str | None = None,
     ) -> DailyReportRecord:
         self._record = DailyReportRecord(
             timeline_id=timeline_id,
             manual_markdown=manual_markdown,
             manual_metadata=manual_metadata or {},
+            rendered_html=rendered_html,
             updated_at=dt.datetime.now(dt.timezone.utc),
         )
         return self._record
@@ -141,3 +143,27 @@ def test_service_sanitises_manual_markdown() -> None:
     assert report.manual_markdown.startswith("# Title")
     assert "<script>" not in report.rendered_html
     assert report.manual_metadata == {"foo": "bar"}
+    assert repo._record is not None and "<script>" not in (repo._record.rendered_html or "")
+
+
+def test_highlight_includes_thumbnail_for_frames() -> None:
+    context = _make_text_context(summary="Frame summary", start=10.0, end=13.0, context_id="ctx-frame")
+    item = MultimodalContextItem(
+        context=context,
+        timeline_id="timeline-frame",
+        modality=Modality.FRAME,
+        content_ref="frames/frame-001.png",
+        embedding_ready=True,
+    )
+    envelope = ContextEnvelope.from_items(
+        timeline_id="timeline-frame",
+        source="videos/demo.mp4",
+        items=[item],
+    )
+    repo = _StubRepository(envelope)
+    service = DailyReportService(repository=repo)
+
+    report = service.get_report("timeline-frame")
+
+    assert report.highlights, "Frame highlight should be generated"
+    assert report.highlights[0].thumbnail_url == "frames/frame-001.png"

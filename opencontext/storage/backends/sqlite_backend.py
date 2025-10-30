@@ -228,10 +228,20 @@ class SQLiteBackend(IDocumentStorageBackend):
                 timeline_id TEXT PRIMARY KEY,
                 manual_markdown TEXT,
                 manual_metadata TEXT,
+                rendered_html TEXT,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
             '''
         )
+        cursor.execute('PRAGMA table_info(glass_daily_reports)')
+        report_columns = [column[1] for column in cursor.fetchall()]
+        if 'rendered_html' not in report_columns:
+            cursor.execute(
+                '''
+                ALTER TABLE glass_daily_reports
+                ADD COLUMN rendered_html TEXT
+                '''
+            )
 
     def _insert_default_vault_document(self):
         """Insert default Quick Start document"""

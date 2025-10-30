@@ -41,6 +41,7 @@ def _bootstrap_schema(connection: sqlite3.Connection) -> None:
             timeline_id TEXT PRIMARY KEY,
             manual_markdown TEXT,
             manual_metadata TEXT,
+            rendered_html TEXT,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -311,12 +312,15 @@ def test_daily_report_roundtrip() -> None:
         timeline_id=timeline_id,
         manual_markdown="# Report\n\nSummary.",
         manual_metadata={"pinned": ["ctx-1"]},
+        rendered_html="<h1>Report</h1>",
     )
     assert record.manual_markdown.startswith("# Report")
     assert record.manual_metadata["pinned"] == ["ctx-1"]
+    assert record.rendered_html == "<h1>Report</h1>"
     assert record.updated_at is not None
 
     fetched = repo.load_daily_report_record(timeline_id)
     assert fetched is not None
     assert fetched.manual_markdown == record.manual_markdown
     assert fetched.manual_metadata == record.manual_metadata
+    assert fetched.rendered_html == record.rendered_html

@@ -1,13 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 
-import {
-  fetchDailyReport,
-  fetchStatus,
-  fetchUploadLimits,
-  saveDailyReport,
-  uploadVideo,
-} from "./api";
+import { fetchDailyReport, fetchStatus, fetchUploadLimits, generateDailyReport, saveDailyReport, uploadVideo } from "./api";
 import type { DailyReport, UploadLimits } from "./types";
 import type { TimelineEntry } from "./components/TimelineBoard";
 import Header from "./components/Header";
@@ -17,6 +11,7 @@ import ReportComposer from "./components/ReportComposer";
 import HighlightCarousel from "./components/HighlightCarousel";
 import VisualMosaic from "./components/VisualMosaic";
 import StatusToast from "./components/StatusToast";
+import GenerateAction from "./components/GenerateAction";
 
 import "./styles/app.css";
 
@@ -32,6 +27,7 @@ const App = (): JSX.Element => {
   const [manualMarkdown, setManualMarkdown] = useState("");
   const [toast, setToast] = useState<{ message: string; tone: ToastTone } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const pollingHandles = useRef<Map<string, number>>(new Map());
 
@@ -63,13 +59,17 @@ const App = (): JSX.Element => {
     }
   }, [uploads, selectedTimeline]);
 
+  const selectedEntry = useMemo(
+    () => uploads.find((item) => item.timelineId === selectedTimeline) ?? null,
+    [uploads, selectedTimeline],
+  );
+
   useEffect(() => {
     if (!selectedTimeline) {
       setReport(null);
       return;
     }
-    const entry = uploads.find((item) => item.timelineId === selectedTimeline);
-    if (!entry || entry.status !== "completed") {
+    if (!selectedEntry || selectedEntry.status !== "completed") {
       setReport(null);
       return;
     }
@@ -83,7 +83,7 @@ const App = (): JSX.Element => {
         showToast((error as Error).message ?? "无法加载日报", "warning");
       }
     })();
-  }, [selectedTimeline, uploads, showToast]);
+  }, [selectedTimeline, selectedEntry, showToast]);
 
   const updateEntry = useCallback((timelineId: string, patch: Partial<TimelineEntry>) => {
     setUploads((prev) =>
@@ -195,15 +195,51 @@ const App = (): JSX.Element => {
     }
   }, [manualMarkdown, report, selectedTimeline, showToast]);
 
+  const handleGenerate = useCallback(async () => {
+    if (!selectedTimeline) {
+      showToast("请先选择一条时间线", "warning");
+      return;
+    }
+    if (!selectedEntry) {
+      showToast("当前时间线列表中不存在该任务", "error");
+      return;
+    }
+    setGenerating(true);
+    try {
+      await generateDailyReport(selectedTimeline);
+      updateEntry(selectedTimeline, { status: "processing" });
+      setReport(null);
+      schedulePoll(selectedTimeline, 0);
+      showToast("已触发重新生成，正在排队处理", "info");
+    } catch (error) {
+      console.error(error);
+      showToast((error as Error).message ?? "触发生成失败", "error");
+    } finally {
+      setGenerating(false);
+    }
+  }, [selectedTimeline, selectedEntry, updateEntry, schedulePoll, showToast, generateDailyReport]);
+
   const autoMarkdown = report?.auto_markdown ?? "";
 
   const highlights = report?.highlights ?? [];
   const visualCards = report?.visual_cards ?? [];
+  const generateDisabled =
+    !selectedEntry ||
+    selectedEntry.status === "pending" ||
+    selectedEntry.status === "uploading" ||
+    selectedEntry.status === "processing";
 
   return (
     <main className="glass-shell">
       <Header />
       <UploadPanel limits={limits} disabled={false} onFilesPicked={handleFilesPicked} />
+      <GenerateAction
+        timelineName={selectedEntry?.filename ?? null}
+        status={selectedEntry?.status ?? null}
+        disabled={generateDisabled}
+        generating={generating}
+        onGenerate={handleGenerate}
+      />
 
       <section className="glass-dashboard">
         <motion.div className="glass-dashboard__column" initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}>

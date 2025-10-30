@@ -87,3 +87,18 @@ export async function saveDailyReport(
   const payload = await parseJson<{ data: DailyReport }>(response);
   return payload.data;
 }
+
+export interface GenerateReportResponse {
+  timeline_id: string;
+  status: string;
+}
+
+export async function generateDailyReport(timelineId: string): Promise<GenerateReportResponse> {
+  const response = await fetch(buildUrl(`/glass/report/${timelineId}/generate`), {
+    method: "POST",
+    headers: jsonHeaders,
+    credentials: "include",
+  });
+  const payload = await parseJson<{ data: GenerateReportResponse }>(response);
+  return payload.data;
+}

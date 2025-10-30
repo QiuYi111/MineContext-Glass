@@ -5,18 +5,39 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+
+def _wait_for_completion(client: TestClient, timeline_id: str, *, timeout: float = 5.0) -> None:
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        response = client.get(f"/glass/status/{timeline_id}")
+        assert response.status_code == 200
+        status = response.json()["data"]["status"]
+        if status == "completed":
+            return
+        if status == "failed":
+            raise AssertionError("ingestion failed unexpectedly")
+        time.sleep(0.1)
+    raise AssertionError("timeline did not reach completed status in time")
+
 from glass.webui.backend.app import create_app
 from glass.webui.backend.config import BackendConfig, UploadLimits
 
 
 def _make_config(tmp_dir: Path) -> BackendConfig:
-    return BackendConfig(
+    config = BackendConfig(
         mode="demo",
         upload_dir=tmp_dir / "uploads",
+        state_db_path=tmp_dir / "state.db",
+        storage_base_dir=tmp_dir / "storage",
         demo_data_dir=Path(__file__).resolve().parents[1] / "demo_data",
         processing_delay_seconds=0.0,
         upload_limits=UploadLimits(max_size_mb=8, allowed_types=["video/mp4"], max_concurrent=1),
     )
+    config.upload_dir.mkdir(parents=True, exist_ok=True)
+    config.storage_base_dir.mkdir(parents=True, exist_ok=True)
+    return config
 
 
 def test_demo_seed_is_available(tmp_path: Path) -> None:
@@ -42,11 +63,7 @@ def test_upload_flow_creates_timeline(tmp_path: Path) -> None:
     payload = response.json()["data"]
     timeline_id = payload["timeline_id"]
     assert timeline_id
-
-    status_response = client.get(f"/glass/status/{timeline_id}")
-    assert status_response.status_code == 200
-    status = status_response.json()["data"]["status"]
-    assert status in {"processing", "completed"}
+    _wait_for_completion(client, timeline_id)
 
     report_response = client.get(f"/glass/report/{timeline_id}")
     assert report_response.status_code == 200
@@ -64,6 +81,7 @@ def test_manual_report_update(tmp_path: Path) -> None:
         files={"file": ("sample.mp4", io.BytesIO(b"data"), "video/mp4")},
     )
     timeline_id = upload.json()["data"]["timeline_id"]
+    _wait_for_completion(client, timeline_id)
 
     update = client.put(
         f"/glass/report/{timeline_id}",

@@ -10,6 +10,7 @@ from glass.reports.models import TimelineHighlight, VisualCard
 from .models import TimelineRecord, UploadStatus
 from .repositories import TimelineRepository
 from .services.reports import DailyReportBuilder
+from .state import UploadTask, UploadTaskRepository
 
 
 def load_demo_timelines(
@@ -17,6 +18,7 @@ def load_demo_timelines(
     *,
     repository: TimelineRepository,
     report_builder: DailyReportBuilder,
+    tasks: UploadTaskRepository | None = None,
 ) -> None:
     """Seed the repository with demo timelines defined in JSON files."""
     if not directory.exists():
@@ -35,6 +37,18 @@ def load_demo_timelines(
             if record.status is UploadStatus.COMPLETED:
                 report_builder.build_auto_report(record)
                 repository.upsert(record)
+            if tasks:
+                tasks.upsert(
+                    UploadTask(
+                        timeline_id=record.timeline_id,
+                        filename=record.filename,
+                        source_path=record.source_path,
+                        status=record.status,
+                        submitted_at=record.submitted_at,
+                        updated_at=record.completed_at or record.submitted_at,
+                        completed_at=record.completed_at,
+                    )
+                )
 
 
 def _iter_timelines(payload: Any) -> Iterable[dict[str, Any]]:
@@ -89,4 +103,3 @@ def _parse_datetime(value: Any):
         return datetime.fromisoformat(value)
     except Exception:  # noqa: BLE001
         return None
-

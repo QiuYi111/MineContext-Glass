@@ -23,6 +23,7 @@ class DailyReportRecord:
     timeline_id: str
     manual_markdown: str | None
     manual_metadata: dict | None
+    rendered_html: str | None
     updated_at: _dt.datetime | None
 
 
@@ -236,7 +237,7 @@ class GlassContextRepository:
         with self._transaction(readonly=True) as cursor:
             cursor.execute(
                 """
-                SELECT timeline_id, manual_markdown, manual_metadata, updated_at
+                SELECT timeline_id, manual_markdown, manual_metadata, rendered_html, updated_at
                 FROM glass_daily_reports
                 WHERE timeline_id = ?
                 """,
@@ -247,19 +248,22 @@ class GlassContextRepository:
         if not row:
             return None
 
-        manual_metadata = None
+        manual_metadata: dict | None = None
         metadata_payload = row["manual_metadata"]
         if metadata_payload:
             try:
                 manual_metadata = json.loads(metadata_payload)
             except json.JSONDecodeError:
                 logger.debug("Failed to decode manual_metadata for timeline %s", timeline_id)
+        if manual_metadata is None:
+            manual_metadata = {}
 
         updated_at = _parse_sqlite_timestamp(row["updated_at"])
         return DailyReportRecord(
             timeline_id=row["timeline_id"],
             manual_markdown=row["manual_markdown"],
             manual_metadata=manual_metadata,
+            rendered_html=row["rendered_html"],
             updated_at=updated_at,
         )
 
@@ -269,26 +273,36 @@ class GlassContextRepository:
         timeline_id: str,
         manual_markdown: str | None,
         manual_metadata: dict | None = None,
+        rendered_html: str | None = None,
     ) -> DailyReportRecord:
         """Persist manual report content for a timeline."""
         metadata_payload = json.dumps(manual_metadata) if manual_metadata else None
         with self._transaction() as cursor:
             cursor.execute(
                 """
-                INSERT INTO glass_daily_reports (timeline_id, manual_markdown, manual_metadata, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO glass_daily_reports (timeline_id, manual_markdown, manual_metadata, rendered_html, updated_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(timeline_id) DO UPDATE SET
                     manual_markdown = excluded.manual_markdown,
                     manual_metadata = excluded.manual_metadata,
+                    rendered_html = excluded.rendered_html,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (timeline_id, manual_markdown, metadata_payload),
+                (timeline_id, manual_markdown, metadata_payload, rendered_html),
             )
 
         record = self.load_daily_report_record(timeline_id)
         if not record:
             raise RuntimeError(f"Failed to persist daily report for timeline {timeline_id}")
         return record
+
+    def clear_daily_report(self, timeline_id: str) -> None:
+        """Remove any manual report overrides for a timeline."""
+        with self._transaction() as cursor:
+            cursor.execute(
+                "DELETE FROM glass_daily_reports WHERE timeline_id = ?",
+                (timeline_id,),
+            )
 
     def _resolve_storage(self) -> UnifiedStorage:
         storage = get_global_storage().get_storage()
