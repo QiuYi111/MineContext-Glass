@@ -13,6 +13,7 @@ from .models import AlignmentManifest, AlignmentSegment, IngestionStatus, Segmen
 from .video_manager import TimelineNotFoundError, VideoManager
 from .speech_to_text import SpeechToTextRunner, TranscriptionResult
 from .state_manager import AtomicStateManager, StateError, create_state_manager
+from .speech_fallback import FallbackSpeechToTextRunner, with_speech_fallback
 
 
 class LocalVideoManager(VideoManager):
@@ -42,7 +43,11 @@ class LocalVideoManager(VideoManager):
 
         self._base_dir = (base_dir or Path("persist") / "glass").resolve()
         self._ffmpeg = ffmpeg_runner or FFmpegRunner()
-        self._speech = speech_runner
+        self._speech = FallbackSpeechToTextRunner(
+            base_runner=speech_runner,
+            fallback_enabled=True,
+            log_failures=True,
+        )
         self._frame_rate = frame_rate
         self._state_manager = create_state_manager(self._base_dir)
 
