@@ -24,6 +24,7 @@ from glass.ingestion import (
 from glass.ingestion.service import GlassIngestionService
 from glass.storage.context_repository import GlassContextRepository
 from opencontext.config.global_config import GlobalConfig
+from opencontext.config.glass_config import GlassConfig, create_glass_config
 from opencontext.server.opencontext import OpenContext
 from opencontext.server.utils import convert_resp, get_context_lab
 
@@ -68,21 +69,15 @@ def _get_report_service(
 
 
 def _load_upload_limits() -> dict[str, Any]:
-    defaults = {
-        "max_size_mb": 2_048,
-        "allowed_types": ["video/mp4", "video/quicktime", "video/x-matroska"],
-        "max_concurrent": 2,
-    }
-    try:
-        config = GlobalConfig.get_instance().get_config("glass.uploads") or {}
-    except Exception:  # noqa: BLE001
-        return defaults
+    """Load upload limits using unified Glass configuration."""
+    glass_config = create_glass_config()
+    limits = glass_config.upload_limits
 
-    merged = defaults.copy()
-    for key, value in config.items():
-        if value is not None:
-            merged[key] = value
-    return merged
+    return {
+        "max_size_mb": limits.max_size_mb,
+        "allowed_types": limits.allowed_types,
+        "max_concurrent": limits.max_concurrent,
+    }
 
 
 async def _persist_upload(file: UploadFile, destination: Path) -> None:
