@@ -11,6 +11,7 @@ Built on ByteDance's [MineContext](https://github.com/volcengine/MineContext), e
 </div>
 
 <p align="center">
+  <a href="README_QUICK_START.md">🚀 Quick Start (2 minutes)</a> •
   <a href="README_zh.md">中文文档</a>
 </p>
 
@@ -21,31 +22,124 @@ Built on ByteDance's [MineContext](https://github.com/volcengine/MineContext), e
   <img alt="AUC Turbo" src="https://img.shields.io/badge/AUC%20Turbo-required%20API-red.svg">
 </p>
 
+## 🚀 Quick Start (Choose Your Path)
+
+### Option 1: Glass CLI - Process Videos in One Command
+```bash
+# 1. Start server
+uv run opencontext start --port 8000 --config config/config.yaml
+
+# 2. Process videos for November 12th
+uv run glass start 12-11
+
+# 3. View report
+open persist/reports/12-11.md
+```
+
+### Option 2: WebUI - Drag & Drop Interface
+```bash
+# 1. Start server
+uv run opencontext start --port 8000 --config config/config.yaml
+
+# 2. Start WebUI
+cd glass/webui && npm run dev
+
+# 3. Open browser to http://localhost:5174
+```
+
+**🔗 [Full Quick Start Guide →](README_QUICK_START.md)**
+
+**📦 [Setup Script → ./quick_setup.sh]** • **✅ [Validation → ./validate_setup.py]**
+
+## 📋 Prerequisites (30-second setup)
+
+### 🚀 Super Quick Setup (Recommended)
+```bash
+# 1. Run our automated setup script
+./quick_setup.sh
+
+# 2. Validate installation
+uv run python validate_setup.py
+```
+
+### Manual Setup (If you prefer)
+```bash
+# Install uv package manager
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install dependencies
+uv sync
+
+# Install FFmpeg
+brew install ffmpeg  # macOS
+# sudo apt install ffmpeg  # Ubuntu/Debian
+```
+
+## 🎯 What You Get
+
+- **📹 Video Processing:** Transform daily recordings into searchable context
+- **🗣️ Speech Recognition:** AUC Turbo transcription for audio content
+- **🔍 Smart Search:** Find moments across your visual memory
+- **📊 Daily Reports:** AI-generated summaries of your day
+- **🌐 Web Interface:** Drag-and-drop video processing
+- **⚡ CLI Tools:** Batch processing and automation
+
+## 🏗️ Architecture Overview
+
+```
+Smart Glasses → Video Capture → Frame Extraction → Speech Recognition → Context Storage → Search & Reports
+```
+
+**Key Components:**
+- **Video Pipeline:** FFmpeg-based processing with adaptive sampling
+- **Speech Layer:** Doubao AUC Turbo for transcription
+- **Context Engine:** Unified storage with MineContext foundation
+- **WebUI:** React frontend with real-time processing
+- **CLI Tools:** Command-line interface for batch operations
+
+## 🛠️ Current Capabilities
+
+- ✅ **Video Ingestion:** MP4/MOV/MKV support, up to 2GB per file
+- ✅ **Speech Recognition:** AUC Turbo integration for audio transcription
+- ✅ **Frame Extraction:** Adaptive sampling for optimal context density
+- ✅ **Timeline Generation:** Chronological organization with highlights
+- ✅ **Report Generation:** Markdown summaries with visual cards
+- ✅ **Web Interface:** Interactive upload and browsing
+- ✅ **CLI Processing:** Batch operations and automation
+
+## 📊 Technical Improvements (Recent)
+
+Following Linus Torvalds' code audit recommendations:
+
+- ✅ **Architecture Simplified:** 4-layer → 2-layer design
+- ✅ **Race Conditions Fixed:** Atomic state management
+- ✅ **Single Points Eliminated:** Speech recognition fallback
+- ✅ **Configuration Unified:** Single GlobalConfig system
+- ✅ **Reliability Enhanced:** Graceful error handling
+
+## 🎯 Next Steps
+
+1. **Try it:** Follow the [Quick Start Guide](README_QUICK_START.md)
+2. **Configure:** Set up AUC Turbo credentials
+3. **Process:** Upload your first video
+4. **Explore:** Search through your visual context
+
+## 📚 Documentation
+
+- **🔧 Setup:** [Quick Start Guide](README_QUICK_START.md)
+- **📖 Details:** [Full Documentation](#detailed-documentation) below
+- **🐛 Issues:** [GitHub Issues](https://github.com/your-repo/issues)
+- **💬 Community:** [GitHub Discussions](https://github.com/your-repo/discussions)
+
+---
+
+## Detailed Documentation
+
 ## Vision
 
 MineContext Glass reimagines personal context management around daily life. Using smart glasses, we capture day-long video streams and transform them into an organized, searchable knowledge base that bridges the physical and digital worlds. Every clip becomes part of a living memory system that powers summaries, reminders, and intelligent recommendations.
 
 By standing on MineContext's mature context engineering foundations, we combine the existing cyberspace context (screen captures, documents, chats) with real-life visuals to create a full-spectrum, proactive assistant. The next milestone is speech recognition extracted from captured video audio, so conversations and spoken cues join the same context graph.
-
-## Current Capabilities
-
-- Continuous video ingestion from supported smart glasses, including automatic transfer, transcoding, and secure local storage.
-- Adaptive frame sampling and embedding generation to distill long recordings into meaningful context snippets ready for retrieval.
-- Unified context indexing that merges video-derived insights with the original MineContext knowledge base.
-- Event and highlight surfacing that transforms raw clips into timelines, daily digests, and recall prompts.
-- Doubao AUC Turbo transcription that turns audio tracks into aligned text segments without running heavyweight local models.
-
-## Roadmap
-
-| Status           | Milestone              | Description                                                                        |
-| ---------------- | ---------------------- | ---------------------------------------------------------------------------------- |
-| ✅ Completed     | Video capture pipeline | Daily video recording, compression, and context extraction are production-ready.   |
-| ✅ Completed     | Speech recognition     | Doubao AUC Turbo transcription keeps voice context aligned with video timelines.  |
-| 🧪 Planned       | Multimodal synthesis   | Fuse visual, audio, and digital signals into richer summaries and proactive tasks. |
-
-## Quick Start
-
-This repository keeps MineContext's developer tooling while adding the video processing stack.
 
 ### Prerequisites
 
