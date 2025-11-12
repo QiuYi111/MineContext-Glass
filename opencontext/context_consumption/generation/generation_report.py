@@ -8,7 +8,7 @@ OpenContext module: generation_report
 """
 
 import datetime, json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Sequence
 
 from opencontext.config import GlobalConfig
 from opencontext.storage.global_storage import get_storage
@@ -100,6 +100,29 @@ class ReportGenerator:
             return result
         except Exception as e:
             logger.exception(f"Error generating activity report: {e}")
+            return f"Error generating activity report: {str(e)}"
+
+    async def generate_report_from_contexts(
+        self,
+        contexts: Sequence[str],
+        start_time: int,
+        end_time: int,
+    ) -> str:
+        """
+        Generate an activity report using a precomputed list of context strings.
+        """
+        try:
+            if not contexts:
+                return ""
+
+            result = await self._generate_report_with_llm(list(contexts), start_time, end_time)
+            if not result:
+                return ""
+
+            await self._persist_report(result)
+            return result
+        except Exception as e:  # noqa: BLE001
+            logger.exception(f"Error generating activity report from contexts: {e}")
             return f"Error generating activity report: {str(e)}"
     
     async def _generate_single_report(

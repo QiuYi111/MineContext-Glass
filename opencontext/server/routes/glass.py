@@ -199,6 +199,31 @@ def update_daily_report(
     return convert_resp(report)
 
 
+@router.post("/report/{timeline_id}/generate")
+def regenerate_daily_report(
+    timeline_id: str,
+    repository: GlassContextRepository = Depends(_get_repository),
+    report_service: DailyReportService = Depends(_get_report_service),
+) -> dict:
+    """Regenerate the daily report for a timeline by clearing manual edits."""
+    envelope = repository.load_envelope(timeline_id)
+    if envelope is None:
+        raise HTTPException(status_code=404, detail="timeline not ready")
+
+    # Clear any manual report by saving empty manual content
+    try:
+        repository.upsert_daily_report(
+            timeline_id=timeline_id,
+            manual_markdown="",
+            manual_metadata={},
+            rendered_html="",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate report: {exc}") from exc
+
+    return convert_resp({"timeline_id": timeline_id, "status": "queued"})
+
+
 def _safe_status_lookup(ingestion: GlassIngestionService, timeline_id: str) -> IngestionStatus:
     try:
         return ingestion.get_status(timeline_id)

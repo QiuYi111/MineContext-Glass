@@ -23,17 +23,18 @@ def _bootstrap_schema(connection: sqlite3.Connection) -> None:
         """
         CREATE TABLE glass_multimodal_context (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timeline_id TEXT NOT NULL,
-            context_id TEXT NOT NULL UNIQUE,
-            modality TEXT NOT NULL,
-            content_ref TEXT NOT NULL,
-            embedding_ready BOOLEAN DEFAULT 0,
-            context_type TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                timeline_id TEXT NOT NULL,
+                context_id TEXT NOT NULL UNIQUE,
+                modality TEXT NOT NULL,
+                content_ref TEXT NOT NULL,
+                embedding_ready BOOLEAN DEFAULT 0,
+                context_type TEXT,
+                auto_summary_json TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         )
-        """
-    )
 
 
 def _make_context(
@@ -181,3 +182,51 @@ def test_report_generator_prefers_glass_timeline(monkeypatch) -> None:
     assert "segment-two" in user_message
     assert "segment-one" in user_message
     assert "Z" in user_message
+
+
+def test_generate_report_from_contexts(monkeypatch) -> None:
+    storage = _StubStorage()
+
+    captured_messages: dict[str, list] = {}
+
+    async def _fake_generate(messages, **_kwargs):
+        captured_messages["messages"] = messages
+        return "Aggregated report"
+
+    def _fake_get_storage():
+        return storage
+
+    def _fake_publish_event(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "opencontext.context_consumption.generation.generation_report.generate_with_messages_async",
+        _fake_generate,
+    )
+    monkeypatch.setattr(
+        "opencontext.storage.global_storage.get_storage",
+        _fake_get_storage,
+    )
+    monkeypatch.setattr(
+        "opencontext.managers.event_manager.publish_event",
+        _fake_publish_event,
+    )
+
+    generator = ReportGenerator()
+    start_ts = int(datetime.datetime(2025, 1, 2, tzinfo=datetime.timezone.utc).timestamp())
+    end_ts = start_ts + 60
+
+    report = asyncio.run(
+        generator.generate_report_from_contexts(
+            ["context-one", "context-two"],
+            start_ts,
+            end_ts,
+        )
+    )
+
+    assert report == "Aggregated report"
+    assert storage.reports, "Report content should be persisted"
+    assert "messages" in captured_messages
+    user_message = captured_messages["messages"][1]["content"]
+    assert "context-one" in user_message
+    assert "context-two" in user_message

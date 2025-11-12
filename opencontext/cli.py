@@ -23,6 +23,8 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 from glass.commands import GlassBatchRunner, TimelineRunResult, discover_date_videos
+from glass.storage.context_repository import GlassContextRepository
+from opencontext.models.context import ProcessedContext
 from opencontext.server.opencontext import OpenContext
 from opencontext.server.api import router as api_router
 from opencontext.config.config_manager import ConfigManager
@@ -435,7 +437,6 @@ def _handle_glass_start(args: argparse.Namespace) -> int:
     try:
         runner = GlassBatchRunner(
             frame_rate=args.frame_rate,
-            report_lookback_minutes=args.lookback_minutes,
         )
         results = runner.run(
             date_token=date_token,
@@ -452,9 +453,40 @@ def _handle_glass_start(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        aggregate_path = _render_daily_report(results, report_dir, date_token)
+        context_strings, start_ts, end_ts = _collect_daily_contexts(
+            results,
+            runner.repository,
+            lookback_minutes=getattr(args, "lookback_minutes", None),
+        )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to compose daily report: %s", exc)
+        logger.warning("Failed to gather contexts for daily report: %s", exc)
+        context_strings = []
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        start_ts = end_ts = now_ts
+
+    daily_report = ""
+    if context_strings:
+        try:
+            daily_report = _generate_daily_report_content(
+                context_strings,
+                start_ts=start_ts,
+                end_ts=end_ts,
+                repository=runner.repository,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Failed to generate aggregated daily report: %s", exc)
+    else:
+        logger.warning("No processed contexts available to compose daily report for %s", date_token)
+
+    try:
+        aggregate_path = _write_daily_report(
+            report_content=daily_report,
+            report_dir=report_dir,
+            date_token=date_token,
+            results=results,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to write daily report: %s", exc)
         aggregate_path = None
 
     for result in results:
@@ -464,20 +496,98 @@ def _handle_glass_start(args: argparse.Namespace) -> int:
             result.processed_contexts,
             result.video_path,
         )
-        if result.report_path:
-            logger.info("  Report saved to %s", result.report_path)
 
     if aggregate_path:
         logger.info("Daily report saved to %s", aggregate_path)
     return 0
 
 
-def _render_daily_report(
+def _collect_daily_contexts(
+    results: Sequence[TimelineRunResult],
+    repository: GlassContextRepository,
+    lookback_minutes: Optional[int] = None,
+) -> tuple[list[str], int, int]:
+    """Collect context strings and their time bounds for all processed timelines."""
+    from glass.consumption import GlassContextSource
+
+    source = GlassContextSource(repository=repository)
+    context_strings: list[str] = []
+    timestamps: list[int] = []
+    cutoff_ts: Optional[int] = None
+    if lookback_minutes and lookback_minutes > 0:
+        cutoff_ts = int(datetime.now(timezone.utc).timestamp()) - lookback_minutes * 60
+
+    for result in results:
+        contexts = source.get_processed_contexts(result.timeline_id)
+        for context in contexts:
+            timestamp = _context_timestamp(context)
+            if cutoff_ts is not None and timestamp is not None and timestamp < cutoff_ts:
+                continue
+            if timestamp is not None:
+                timestamps.append(timestamp)
+            try:
+                context_strings.append(context.get_llm_context_string())
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    "Failed to serialise context %s for timeline %s: %s",
+                    getattr(context, "id", "unknown"),
+                    result.timeline_id,
+                    exc,
+                )
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    start_ts = min(timestamps) if timestamps else now_ts
+    end_ts = max(timestamps) if timestamps else now_ts
+    return context_strings, start_ts, end_ts
+
+
+def _context_timestamp(context: ProcessedContext) -> Optional[int]:
+    """Extract a UTC timestamp from a ProcessedContext."""
+    try:
+        create_time = context.properties.create_time
+        if not create_time:
+            return None
+        if create_time.tzinfo is None:
+            create_time = create_time.replace(tzinfo=timezone.utc)
+        else:
+            create_time = create_time.astimezone(timezone.utc)
+        return int(create_time.timestamp())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _generate_daily_report_content(
+    context_strings: Sequence[str],
+    *,
+    start_ts: int,
+    end_ts: int,
+    repository: GlassContextRepository,
+) -> str:
+    """Generate a single daily report with all collected contexts."""
+    from glass.consumption import GlassContextSource
+    from opencontext.context_consumption.generation.generation_report import ReportGenerator
+
+    if not context_strings:
+        return ""
+
+    generator = ReportGenerator(glass_source=GlassContextSource(repository=repository))
+    return asyncio.run(
+        generator.generate_report_from_contexts(
+            list(context_strings),
+            start_ts,
+            end_ts,
+        )
+    )
+
+
+def _write_daily_report(
     results: Sequence[TimelineRunResult],
     report_dir: Path,
     date_token: str,
+    *,
+    report_content: str,
 ) -> Path:
-    """Compose a single Markdown file aggregating all timeline reports."""
+    """Persist the aggregated daily report to disk."""
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
     lines = [
         f"# Glass Daily Report - {date_token}",
@@ -486,16 +596,17 @@ def _render_daily_report(
         "",
     ]
 
+    if report_content:
+        lines.append(report_content.strip())
+        lines.append("")
+    else:
+        lines.append("_No report content produced for this date._")
+        lines.append("")
+
+    lines.append("## Processed Timelines")
     for result in results:
-        lines.append(f"## Timeline: {result.timeline_id}")
-        lines.append(f"Source video: `{result.video_path.name}`")
-        lines.append("")
-        if result.report_path and result.report_path.exists():
-            content = result.report_path.read_text(encoding="utf-8")
-            lines.append(content)
-        else:
-            lines.append("_No report content produced for this timeline._")
-        lines.append("")
+        lines.append(f"- `{result.timeline_id}` from `{result.video_path.name}` ({result.processed_contexts} contexts)")
+    lines.append("")
 
     report_dir.mkdir(parents=True, exist_ok=True)
     aggregate_path = report_dir / f"{date_token}-daily.md"

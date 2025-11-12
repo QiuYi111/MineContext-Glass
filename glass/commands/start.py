@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,7 +8,6 @@ from typing import List, Optional, Sequence
 
 from loguru import logger
 
-from glass.consumption import GlassContextSource
 from glass.ingestion import (
     FFmpegRunner,
     LocalVideoManager,
@@ -20,7 +18,6 @@ from glass.processing.chunkers import ManifestChunker
 from glass.processing.timeline_processor import GlassTimelineProcessor
 from glass.processing.visual_encoder import VisualEncoder
 from glass.storage.context_repository import GlassContextRepository
-from opencontext.context_consumption.generation.generation_report import ReportGenerator
 from opencontext.managers.processor_manager import ContextProcessorManager
 from opencontext.models.context import RawContextProperties
 from opencontext.models.enums import ContentFormat, ContextSource
@@ -72,7 +69,7 @@ class TimelineRunResult:
     timeline_id: str
     video_path: Path
     processed_contexts: int
-    report_path: Optional[Path]
+    report_path: Optional[Path] = None
 
 
 class GlassBatchRunner:
@@ -88,7 +85,6 @@ class GlassBatchRunner:
         speech_runner: Optional[SpeechToTextRunner] = None,
         ffmpeg_runner: Optional[FFmpegRunner] = None,
         processor_manager: Optional[ContextProcessorManager] = None,
-        report_lookback_minutes: int = 120,
     ) -> None:
         if frame_rate <= 0:
             raise ValueError("frame_rate must be positive")
@@ -102,10 +98,10 @@ class GlassBatchRunner:
             frame_rate=frame_rate,
         )
         self._processor_manager = processor_manager or self._build_processor_manager(self._repository)
-        self._report_generator = ReportGenerator(
-            glass_source=GlassContextSource(repository=self._repository)
-        )
-        self._report_lookback = max(report_lookback_minutes, 1)
+
+    @property
+    def repository(self) -> GlassContextRepository:
+        return self._repository
 
     def run(
         self,
@@ -136,16 +132,12 @@ class GlassBatchRunner:
                 timeline_id=timeline_id,
                 manifest_json=manifest_json,
             )
-            report_path = self._maybe_generate_report(
-                timeline_id=timeline_id,
-                report_dir=report_dir,
-            )
             results.append(
                 TimelineRunResult(
                     timeline_id=timeline_id,
                     video_path=video_path,
                     processed_contexts=processed_contexts,
-                    report_path=report_path,
+                    report_path=None,
                 )
             )
         return results
@@ -183,39 +175,6 @@ class GlassBatchRunner:
         if not processed_contexts:
             raise RuntimeError(f"Timeline processor emitted no contexts for {timeline_id}")
         return len(processed_contexts)
-
-    def _maybe_generate_report(
-        self,
-        *,
-        timeline_id: str,
-        report_dir: Optional[Path],
-    ) -> Optional[Path]:
-        if not report_dir:
-            return None
-
-        end_ts = int(datetime.now(timezone.utc).timestamp())
-        start_ts = end_ts - self._report_lookback * 60
-        try:
-            report = asyncio.run(
-                self._report_generator.generate_report(
-                    start_ts,
-                    end_ts,
-                    timeline_id=timeline_id,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to generate report for timeline %s: %s", timeline_id, exc)
-            return None
-
-        if not report:
-            logger.info("Report generator returned empty content for %s", timeline_id)
-            return None
-
-        output_path = report_dir / f"{timeline_id}.md"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(report, encoding="utf-8")
-        logger.info("Report written to %s", output_path)
-        return output_path
 
     @staticmethod
     def _build_processor_manager(repository: GlassContextRepository) -> ContextProcessorManager:
