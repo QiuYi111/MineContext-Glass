@@ -12,6 +12,7 @@ from .ffmpeg_runner import FFmpegRunner
 from .models import AlignmentManifest, AlignmentSegment, IngestionStatus, SegmentType
 from .video_manager import TimelineNotFoundError, VideoManager
 from .speech_to_text import SpeechToTextRunner, TranscriptionResult
+from .state_manager import AtomicStateManager, StateError, create_state_manager
 
 
 class LocalVideoManager(VideoManager):
@@ -23,7 +24,6 @@ class LocalVideoManager(VideoManager):
     existing MineContext storage layout.
     """
 
-    STATUS_FILE = "status.json"
     MANIFEST_FILE = "alignment_manifest.json"
     RAW_TRANSCRIPT_FILE = "transcription_raw.json"
 
@@ -44,6 +44,7 @@ class LocalVideoManager(VideoManager):
         self._ffmpeg = ffmpeg_runner or FFmpegRunner()
         self._speech = speech_runner
         self._frame_rate = frame_rate
+        self._state_manager = create_state_manager(self._base_dir)
 
         self._base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -53,17 +54,31 @@ class LocalVideoManager(VideoManager):
             raise FileNotFoundError(f"video not found: {source_path}")
 
         timeline = timeline_id or self._generate_timeline_id()
+
+        # Check if already completed (atomic check)
+        try:
+            state = self._state_manager.get_state(timeline)
+            if state.status == IngestionStatus.COMPLETED:
+                # Return cached result without reprocessing
+                timeline_dir = self._base_dir / timeline
+                manifest_path = timeline_dir / self.MANIFEST_FILE
+                if manifest_path.exists():
+                    logger.info("Manifest already exists for timeline {}, returning cached result", timeline)
+                    return AlignmentManifest.model_validate_json(manifest_path.read_text())
+        except StateError:
+            # Timeline doesn't exist yet, create it
+            pass
+
+        # Create timeline with atomic state management
+        try:
+            state = self._state_manager.create_timeline(timeline)
+            logger.info("Starting ingestion for timeline {} from {}", timeline, source_path)
+            self._state_manager.update_status(timeline, IngestionStatus.PROCESSING)
+        except StateError as exc:
+            logger.error("Failed to create timeline {}: {}", timeline, exc)
+            raise RuntimeError(f"Failed to initialize timeline {timeline}") from exc
+
         timeline_dir = self._base_dir / timeline
-        timeline_dir.mkdir(parents=True, exist_ok=True)
-
-        manifest_path = timeline_dir / self.MANIFEST_FILE
-        if manifest_path.exists():
-            logger.info("Manifest already exists for timeline {}, returning cached result", timeline)
-            return AlignmentManifest.model_validate_json(manifest_path.read_text())
-
-        logger.info("Starting ingestion for timeline {} from {}", timeline, source_path)
-        self._write_status(timeline_dir, IngestionStatus.PROCESSING)
-
         copied_source = timeline_dir / source_path.name
         if not copied_source.exists():
             shutil.copy2(source_path, copied_source)
@@ -92,28 +107,34 @@ class LocalVideoManager(VideoManager):
                 transcription=transcription,
             )
 
+            manifest_path = timeline_dir / self.MANIFEST_FILE
             manifest_path.write_text(manifest.to_json())
             self._write_raw_transcription(timeline_dir, transcription)
-            self._write_status(timeline_dir, IngestionStatus.COMPLETED)
+
+            # Atomically update to completed status
+            self._state_manager.update_status(timeline, IngestionStatus.COMPLETED)
             logger.info("Finished ingestion for timeline {}", timeline)
             return manifest
+
         except Exception as exc:  # noqa: BLE001
             logger.exception("Ingestion failed for timeline {}: {}", timeline, exc)
-            self._write_status(timeline_dir, IngestionStatus.FAILED)
+            # Atomically update to failed status with error message
+            self._state_manager.update_status(timeline, IngestionStatus.FAILED, error_message=str(exc))
             raise
 
     def get_status(self, timeline_id: str) -> IngestionStatus:
-        timeline_dir = self._base_dir / timeline_id
-        status_path = timeline_dir / self.STATUS_FILE
-        if status_path.exists():
-            data = json.loads(status_path.read_text())
-            return IngestionStatus(data["status"])
+        """
+        Get ingestion status for timeline using atomic state management.
 
-        manifest_path = timeline_dir / self.MANIFEST_FILE
-        if manifest_path.exists():
-            return IngestionStatus.COMPLETED
-
-        raise TimelineNotFoundError(timeline_id)
+        This eliminates the race conditions present in the original implementation
+        by using file locking and maintaining a single source of truth.
+        """
+        try:
+            state = self._state_manager.get_state(timeline_id)
+            return state.status
+        except StateError as exc:
+            # Convert StateError to TimelineNotFoundError for API compatibility
+            raise TimelineNotFoundError(timeline_id) from exc
 
     def fetch_manifest(self, timeline_id: str) -> AlignmentManifest:
         timeline_dir = self._base_dir / timeline_id
@@ -122,9 +143,6 @@ class LocalVideoManager(VideoManager):
             raise TimelineNotFoundError(timeline_id)
         return AlignmentManifest.model_validate_json(manifest_path.read_text())
 
-    def _write_status(self, timeline_dir: Path, status: IngestionStatus) -> None:
-        payload = {"status": status.value}
-        (timeline_dir / self.STATUS_FILE).write_text(json.dumps(payload, indent=2))
 
     def _write_raw_transcription(self, timeline_dir: Path, transcription: TranscriptionResult) -> None:
         raw_path = timeline_dir / self.RAW_TRANSCRIPT_FILE
