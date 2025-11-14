@@ -57,6 +57,12 @@ class GlassTimelineProcessor(BaseContextProcessor):
     def can_process(self, context: RawContextProperties) -> bool:
         if not isinstance(context, RawContextProperties):
             return False
+
+        # Check if this is a video context source
+        from opencontext.models import ContextSource
+        if context.source != ContextSource.VIDEO:
+            return False
+
         additional = context.additional_info or {}
         timeline_id = additional.get("timeline_id")
         if not timeline_id:

@@ -3,7 +3,7 @@
 **🚀 Get started in 2 minutes with Glass CLI or WebUI**
 
 <div align="center">
-  <img alt="MineContext" src="src/MineContext-glass.png" width="100%" height="auto">
+  <img alt="MineContext" src="../../assets/MineContext%20Glass.png" width="100%" height="auto">
 
   **Full-Spectrum Personal Context OS for Smart Glasses**
 </div>

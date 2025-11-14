@@ -1,8 +1,6 @@
 <div align="center">
 
-<picture>
-  <img alt="MineContext" src="src/MineContext-glass.png" width="100%" height="auto">
-</picture>
+![MineContext Glass](assets/MineContext%20Glass.png)
 
 ### MineContext Glass：全景个人上下文操作系统
 

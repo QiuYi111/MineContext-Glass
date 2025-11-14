@@ -1,8 +1,6 @@
 <div align="center">
 
-<picture>
-  <img alt="MineContext" src="src/MineContext-glass.png" width="100%" height="auto">
-</picture>
+![MineContext Glass](assets/MineContext%20Glass.png)
 
 ### MineContext Glass: Full-Spectrum Personal Context OS
 
@@ -11,8 +9,9 @@ Built on ByteDance's [MineContext](https://github.com/volcengine/MineContext), e
 </div>
 
 <p align="center">
-  <a href="README_QUICK_START.md">🚀 Quick Start (2 minutes)</a> •
-  <a href="README_zh.md">中文文档</a>
+  <a href="#quick-start">🚀 Quick Start (2 minutes)</a> •
+  <a href="#中文快速开始">中文文档</a> •
+  <a href="docs/guides/README_QUICK_START.md">📖 Detailed Guide</a>
 </p>
 
 <p align="center">
@@ -42,14 +41,57 @@ open persist/reports/12-11.md
 uv run opencontext start --port 8000 --config config/config.yaml
 
 # 2. Start WebUI
-cd glass/webui && npm run dev
+cd webui && npm run dev
 
 # 3. Open browser to http://localhost:5174
 ```
 
-**🔗 [Full Quick Start Guide →](README_QUICK_START.md)**
+**🔗 [Full Quick Start Guide →](docs/guides/README_QUICK_START.md)**
 
-**📦 [Setup Script → ./quick_setup.sh]** • **✅ [Validation → ./validate_setup.py]**
+**📦 [Setup Script → scripts/setup/quick_setup.sh]** • **✅ [Validation → scripts/setup/validate_setup.py]**
+
+## 中文快速开始 {#中文快速开始}
+
+### 🎯 两种使用方式
+
+**方式1：命令行 (适合高级用户)**
+```bash
+# 1. 启动服务
+uv run opencontext start --port 8000 --config config/config.yaml
+
+# 2. 处理11月12日的视频
+uv run glass start 12-11
+
+# 3. 查看报告
+open persist/reports/12-11.md
+```
+
+**方式2：网页界面 (适合交互使用)**
+```bash
+# 1. 启动服务
+uv run opencontext start --port 8000 --config config/config.yaml
+
+# 2. 启动网页界面
+cd webui && npm run dev
+
+# 3. 打开浏览器访问 http://localhost:5174
+```
+
+### 🔑 首次设置 (30秒)
+
+```bash
+# 1. 获取 AUC Turbo 凭证
+export AUC_APP_KEY=你的应用密钥
+export AUC_ACCESS_KEY=你的访问密钥
+
+# 2. 复制配置模板
+cp config/config.yaml.example config/config.yaml
+
+# 3. 验证安装
+uv run glass --help
+```
+
+**🔗 [完整中文文档 →](README_zh.md)**
 
 ## 📋 Prerequisites (30-second setup)
 
@@ -126,14 +168,36 @@ Following Linus Torvalds' code audit recommendations:
 
 ## 📚 Documentation
 
-- **🔧 Setup:** [Quick Start Guide](README_QUICK_START.md)
+- **🔧 Setup:** [Quick Start Guide](docs/guides/README_QUICK_START.md)
 - **📖 Details:** [Full Documentation](#detailed-documentation) below
+- **🇨🇳 中文:** [Chinese Documentation](README_zh.md)
 - **🐛 Issues:** [GitHub Issues](https://github.com/your-repo/issues)
 - **💬 Community:** [GitHub Discussions](https://github.com/your-repo/discussions)
 
 ---
 
 ## Detailed Documentation
+
+### 📖 Table of Contents
+
+- [Vision](#vision)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Start the Pipeline](#start-the-pipeline)
+- [Speech Recognition with AUC Turbo](#speech-recognition-with-auc-turbo)
+- [Generate Glass Reports](#generate-glass-reports)
+- [Frame-Only Ingest (Legacy)](#frame-only-ingest-legacy)
+- [Architecture](#architecture)
+- [Contributing](#contributing)
+
+---
+
+## 详细文档 (中文) {#detailed-documentation-zh}
+
+**🔗 [查看完整中文文档 →](README_zh.md)**
+
+---
 
 ## Vision
 
@@ -182,7 +246,7 @@ glass:
       max_duration_sec: 7200
 ```
 
-Credentials can live in the config file, environment variables, or be passed as CLI flags. See `glass/new_auc.md` for quotas, error codes, and troubleshooting tips.
+Credentials can live in the config file, environment variables, or be passed as CLI flags. See [docs/api/GLASS_AUDIT_REPORT.md](docs/api/GLASS_AUDIT_REPORT.md) for quotas, error codes, and troubleshooting tips.
 
 ### Start the Pipeline
 
@@ -249,6 +313,32 @@ MineContext Glass keeps the original context-flow of `context_capture → contex
 - **Unified Retrieval API** exposes both cyberspace and real-life context through a single search and recommendation surface.
 
 Refer to `opencontext/` for CLI entry points, managers, storage adapters, and utilities; configuration files live under `config/`, while runtime data persists in `persist/` and `logs/`.
+
+---
+
+## 📚 文档导航
+
+### 语言版本
+- **English**: 当前文档
+- **中文**: [README_zh.md](README_zh.md) - 完整中文文档
+
+### 快速导航
+- **🚀 快速开始**: [2分钟入门](docs/guides/README_QUICK_START.md)
+- **🔧 设置指南**: [详细配置说明](#configuration)
+- **🛠️ 故障排除**: [常见问题解决](docs/guides/README_QUICK_START.md#troubleshooting)
+- **📊 技术审计**: [架构改进报告](docs/api/GLASS_AUDIT_REPORT.md)
+
+### 核心功能
+- **视频处理**: 支持MP4/MOV/MKV格式，最大2GB
+- **语音识别**: AUC Turbo集成，音频转录
+- **智能搜索**: 跨模态上下文检索
+- **报告生成**: Markdown格式日常总结
+- **网页界面**: 拖拽上传，实时处理
+
+### 相关文档
+- [CONTRIBUTING.md](docs/CONTRIBUTING.md) - 贡献指南
+- [AGENTS.md](docs/AGENTS.md) - 代理说明
+- [技术债务清理](docs/api/TECH_DEBT_CLEANUP.md) - 架构改进详情
 
 ## Contributing
 

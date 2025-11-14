@@ -164,7 +164,7 @@ class ContextProcessorManager:
             return processor.process(initial_input)
         except Exception as e:
             logger.exception(f"Processing component '{processor_name}' encountered exception while processing data: {e}")
-        return false
+        return False
 
     def batch_process(
         self, initial_inputs: List[RawContextProperties]
