@@ -9,6 +9,7 @@ Command-line interface - provides the entry point for command-line tools
 
 import argparse
 import asyncio
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -35,6 +36,7 @@ logger = get_logger(__name__)
 # Global variables for multi-process support
 _config_path = None
 _context_lab_instance = None
+_capture_enabled = True
 
 def get_or_create_context_lab():
     """Get or create the global OpenContext instance for the current process."""
@@ -42,7 +44,10 @@ def get_or_create_context_lab():
     if _context_lab_instance is None:
         _context_lab_instance = _initialize_context_lab(_config_path)
         _context_lab_instance.initialize()
-        _context_lab_instance.start_capture()
+        # Check both global variable and environment variable (for multi-process mode)
+        capture_enabled = _capture_enabled and os.getenv("OPENCAPTURE_NO_CAPTURE", "0") != "1"
+        if capture_enabled:
+            _context_lab_instance.start_capture()
     return _context_lab_instance
 
 @asynccontextmanager
@@ -159,6 +164,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=1,
         help="Number of worker processes (default: 1)"
+    )
+    start_parser.add_argument(
+        "--no-capture",
+        action="store_true",
+        help="Disable context capture (start server without screenshot/file monitoring)"
     )
 
     # Glass utilities
@@ -289,13 +299,25 @@ def handle_start(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for failure)
     """
+    global _capture_enabled
+
+    # Set global capture flag based on command line argument
+    _capture_enabled = not getattr(args, 'no_capture', False)
+
+    # Set environment variable for multi-process mode
+    if getattr(args, 'no_capture', False):
+        os.environ["OPENCAPTURE_NO_CAPTURE"] = "1"
+
     try:
         lab_instance = _initialize_context_lab(args.config)
     except RuntimeError:
         return 1
 
     logger.info("Starting all modules")
-    lab_instance.start_capture()
+    if _capture_enabled:
+        lab_instance.start_capture()
+    else:
+        logger.info("Context capture disabled (use --no-capture flag to disable screenshot/file monitoring)")
 
     from opencontext.config.global_config import get_config
     web_config = get_config("web")

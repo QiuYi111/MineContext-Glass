@@ -10,8 +10,8 @@ echo "Starting MineContext Glass development servers..."
 # Create a new tmux session named 'glass-dev' or attach to existing one
 tmux new-session -d -s glass-dev -n "backend" -c "$PWD"
 
-# Start backend server in first pane
-tmux send-keys -t glass-dev:backend "uv run opencontext start --port 8000 --config config/config.yaml" C-m
+# Start backend server in first pane (no capture mode for glass backend)
+tmux send-keys -t glass-dev:backend "uv run opencontext start --port 8000 --config config/config.yaml --no-capture" C-m
 
 # Split window and create WebUI pane
 tmux split-window -v -t glass-dev:backend -c "$PWD/glass/webui"

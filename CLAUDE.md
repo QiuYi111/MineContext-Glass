@@ -20,8 +20,8 @@ export AUC_ACCESS_KEY=your-access-key
 
 ### Backend Development
 ```bash
-# Start main context server
-uv run opencontext start --port 8000 --config config/config.yaml
+# Start main context server (no capture mode for glass backend)
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 
 # Process video for specific date (dd-mm format)
 uv run glass start dd-mm --config config/config.yaml

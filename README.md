@@ -25,8 +25,8 @@ Built on ByteDance's [MineContext](https://github.com/volcengine/MineContext), e
 
 ### Option 1: Glass CLI - Process Videos in One Command
 ```bash
-# 1. Start server
-uv run opencontext start --port 8000 --config config/config.yaml
+# 1. Start server (no capture mode for glass backend)
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 
 # 2. Process videos for November 12th
 uv run glass start 12-11
@@ -37,8 +37,8 @@ open persist/reports/12-11.md
 
 ### Option 2: WebUI - Drag & Drop Interface
 ```bash
-# 1. Start server
-uv run opencontext start --port 8000 --config config/config.yaml
+# 1. Start server (no capture mode for glass backend)
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 
 # 2. Start WebUI
 cd webui && npm run dev
@@ -56,8 +56,8 @@ cd webui && npm run dev
 
 **方式1：命令行 (适合高级用户)**
 ```bash
-# 1. 启动服务
-uv run opencontext start --port 8000 --config config/config.yaml
+# 1. 启动服务 (无录屏模式，适合glass后端)
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 
 # 2. 处理11月12日的视频
 uv run glass start 12-11
@@ -68,8 +68,8 @@ open persist/reports/12-11.md
 
 **方式2：网页界面 (适合交互使用)**
 ```bash
-# 1. 启动服务
-uv run opencontext start --port 8000 --config config/config.yaml
+# 1. 启动服务 (无录屏模式，适合glass后端)
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 
 # 2. 启动网页界面
 cd webui && npm run dev
@@ -253,7 +253,7 @@ Credentials can live in the config file, environment variables, or be passed as 
 Run the context server with:
 
 ```bash
-uv run opencontext start --port 8000 --config config/config.yaml
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 ```
 
 Glasses footage dropped into the configured import path will be processed automatically. Use the CLI or API endpoints to inspect timelines, digests, and retrieved clips.

@@ -97,10 +97,10 @@ glass:
 
 ### 启动管线
 
-使用以下命令运行上下文服务器：
+使用以下命令运行上下文服务器（无录屏模式，适合glass后端）：
 
 ```bash
-uv run opencontext start --port 8000 --config config/config.yaml
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 ```
 
 当智能眼镜素材同步到配置的导入路径后，管线会自动触发处理。可通过 CLI 或 API 查看时间线、摘要以及检索结果。

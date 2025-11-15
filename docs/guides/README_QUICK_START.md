@@ -16,8 +16,8 @@ Choose your preferred way to interact with MineContext Glass:
 **⚡ Process videos and generate reports in one command**
 
 ```bash
-# 1. Start the server
-uv run opencontext start --port 8000 --config config/config.yaml
+# 1. Start the server (no capture mode for glass backend)
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 
 # 2. Process videos for a specific date (dd-mm format)
 uv run glass start 12-11 --config config/config.yaml
@@ -30,8 +30,8 @@ open persist/reports/12-11.md
 **🌐 Drag-and-drop interface with real-time processing**
 
 ```bash
-# 1. Start the server (includes WebUI)
-uv run opencontext start --port 8000 --config config/config.yaml
+# 1. Start the server (no capture mode for glass backend)
+uv run opencontext start --port 8000 --config config/config.yaml --no-capture
 
 # 2. Start WebUI frontend
 cd glass/webui && npm run dev
