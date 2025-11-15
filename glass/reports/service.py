@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
 from dataclasses import dataclass
 from typing import Iterable, List, Optional
@@ -62,6 +63,12 @@ class DailyReportService:
         manual_markdown = manual_record.manual_markdown if manual_record else None
         manual_metadata = manual_record.manual_metadata if manual_record else {}
         updated_at = manual_record.updated_at if manual_record else None
+
+        # Check if we have an intelligent LLM-generated report
+        if manual_metadata and manual_metadata.get("generation_method") == "intelligent_llm" and manual_markdown:
+            # User has generated an intelligent report but hasn't edited it yet
+            auto_markdown = manual_markdown
+            manual_markdown = ""  # Keep manual markdown empty until user edits
 
         chosen_markdown = manual_markdown or auto_markdown
         if manual_record and manual_record.rendered_html:
@@ -205,6 +212,76 @@ class DailyReportService:
         highlights: Iterable[TimelineHighlight],
         max_segments: int = 12,
     ) -> str:
+        """Use CLI's ReportGenerator for intelligent report generation."""
+        try:
+            # Get timeline time range
+            if envelope.items:
+                timestamps = []
+                for item in envelope.items:
+                    metadata = item.context.metadata or {}
+                    start_time = metadata.get("segment_start")
+                    end_time = metadata.get("segment_end")
+                    if end_time:
+                        timestamps.append(float(end_time))
+                    elif start_time:
+                        timestamps.append(float(start_time))
+
+                if timestamps:
+                    start_time = int(min(timestamps))
+                    end_time = int(max(timestamps))
+                else:
+                    # Fallback to current time if no timestamps found
+                    import time
+                    current_time = int(time.time())
+                    start_time = current_time - 3600  # 1 hour ago
+                    end_time = current_time
+            else:
+                # Fallback if no items
+                import time
+                current_time = int(time.time())
+                start_time = current_time - 3600
+                end_time = current_time
+
+            # Generate intelligent report using CLI's ReportGenerator
+            async def generate_intelligent_report():
+                from opencontext.context_consumption.generation.generation_report import ReportGenerator
+                from glass.consumption import GlassContextSource
+
+                generator = ReportGenerator(glass_source=GlassContextSource())
+                return await generator.generate_report(
+                    start_time,
+                    end_time,
+                    timeline_id=envelope.timeline_id,
+                )
+
+            # Run async function in sync context
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                intelligent_report = loop.run_until_complete(generate_intelligent_report())
+            finally:
+                loop.close()
+
+            if intelligent_report:
+                return intelligent_report
+            else:
+                # Fallback to simple template if intelligent generation fails
+                return self._build_simple_template(envelope, highlights, max_segments)
+
+        except Exception as exc:
+            # Log error and fallback to simple template
+            import sys
+            print(f"Error generating intelligent report: {exc}", file=sys.stderr)
+            return self._build_simple_template(envelope, highlights, max_segments)
+
+    def _build_simple_template(
+        self,
+        envelope: ContextEnvelope,
+        *,
+        highlights: Iterable[TimelineHighlight],
+        max_segments: int = 12,
+    ) -> str:
+        """Fallback simple template when intelligent generation fails."""
         text_items = [
             item
             for item in envelope.items
@@ -220,17 +297,17 @@ class DailyReportService:
         selected_items = text_items[:max_segments]
 
         lines: List[str] = []
-        lines.append("# Glass Timeline Daily Report")
+        lines.append("# Glass 时间线日报")
         lines.append("")
-        lines.append(f"- Timeline: `{envelope.timeline_id}`")
+        lines.append(f"- 时间线: `{envelope.timeline_id}`")
         if envelope.source:
-            lines.append(f"- Source: `{envelope.source}`")
-        lines.append(f"- Generated at: {_dt.datetime.now(tz=_dt.timezone.utc).isoformat()}")
+            lines.append(f"- 来源: `{envelope.source}`")
+        lines.append(f"- 生成时间: {_dt.datetime.now(tz=_dt.timezone.utc).isoformat()}")
         lines.append("")
 
         highlight_list = list(highlights)
         if highlight_list:
-            lines.append("## Recent Highlights")
+            lines.append("## 最近亮点")
             for highlight in highlight_list[:5]:
                 timestamp = format_timestamp(highlight.timestamp or highlight.segment_start)
                 summary = highlight.summary or highlight.title
@@ -238,18 +315,29 @@ class DailyReportService:
             lines.append("")
 
         if selected_items:
-            lines.append("## Detailed Segments")
+            lines.append("## 详细片段")
             for item in selected_items:
                 metadata = item.context.metadata or {}
                 summary = (item.context.extracted_data.summary or "").strip()
                 timestamp = format_timestamp(metadata.get("segment_start"))
-                lines.append(f"### {timestamp} · {item.modality.value.capitalize()}")
+
+                # Create more descriptive section headers based on modality
+                if item.modality == Modality.AUDIO:
+                    modality_desc = "语音"
+                elif item.modality == Modality.TEXT:
+                    modality_desc = "文本"
+                elif item.modality == Modality.METADATA:
+                    modality_desc = "元数据"
+                else:
+                    modality_desc = item.modality.value.capitalize()
+
+                lines.append(f"### {timestamp} · {modality_desc}")
                 if summary:
                     lines.append("")
                     lines.append(summary)
                     lines.append("")
         else:
-            lines.append("_No textual segments were generated for this timeline yet._")
+            lines.append("_此时间线尚未生成文本片段。_")
 
         return "\n".join(lines).strip()
 
@@ -259,16 +347,25 @@ class DailyReportService:
             return summary.splitlines()[0][:80]
         metadata = item.context.metadata or {}
         timestamp = format_timestamp(metadata.get("segment_start"))
-        return f"{item.modality.value.title()} segment at {timestamp}"
+
+        # Provide more descriptive titles based on modality
+        if item.modality == Modality.AUDIO:
+            return f"语音片段 · {timestamp}"
+        elif item.modality == Modality.TEXT:
+            return f"文本内容 · {timestamp}"
+        elif item.modality == Modality.FRAME:
+            return f"图像画面 · {timestamp}"
+        else:
+            return f"{item.modality.value} 内容 · {timestamp}"
 
 
 def format_timestamp(value: Optional[float]) -> str:
     if value is None:
-        return "N/A"
+        return "时间未记录"
     try:
         seconds = float(value)
     except (TypeError, ValueError):
-        return "N/A"
+        return "时间未记录"
     minutes, secs = divmod(max(seconds, 0.0), 60)
     hours, minutes = divmod(minutes, 60)
     if hours:
