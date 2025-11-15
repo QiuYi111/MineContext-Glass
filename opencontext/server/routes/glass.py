@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from glass.reports import DailyReportService
+from opencontext.utils.logging_utils import get_logger
 
 from glass.ingestion import (
     IngestionStatus,
@@ -29,6 +30,7 @@ from opencontext.server.opencontext import OpenContext
 from opencontext.server.utils import convert_resp, get_context_lab
 
 router = APIRouter(prefix="/glass", tags=["glass"])
+logger = get_logger(__name__)
 
 
 class ManualReportRequest(BaseModel):
@@ -121,6 +123,15 @@ def get_upload_limits() -> dict:
     return convert_resp(_load_upload_limits())
 
 
+@router.get("/timelines")
+def get_all_timelines(
+    repository: GlassContextRepository = Depends(_get_repository)
+) -> dict:
+    """Get all available timelines with basic metadata."""
+    timelines = repository.get_all_timelines()
+    return convert_resp(timelines)
+
+
 @router.get("/status/{timeline_id}")
 def get_status(
     timeline_id: str,
@@ -200,23 +211,77 @@ def regenerate_daily_report(
     repository: GlassContextRepository = Depends(_get_repository),
     report_service: DailyReportService = Depends(_get_report_service),
 ) -> dict:
-    """Regenerate the daily report for a timeline by clearing manual edits."""
+    """Regenerate the daily report for a timeline using intelligent LLM analysis."""
     envelope = repository.load_envelope(timeline_id)
     if envelope is None:
         raise HTTPException(status_code=404, detail="timeline not ready")
 
-    # Clear any manual report by saving empty manual content
     try:
-        repository.upsert_daily_report(
-            timeline_id=timeline_id,
-            manual_markdown="",
-            manual_metadata={},
-            rendered_html="",
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to regenerate report: {exc}") from exc
+        # Use CLI's ReportGenerator for intelligent report generation
+        import asyncio
+        from opencontext.context_consumption.generation.generation_report import ReportGenerator
+        from glass.consumption import GlassContextSource
 
-    return convert_resp({"timeline_id": timeline_id, "status": "queued"})
+        # Get timeline time range
+        if envelope.items:
+            timestamps = []
+            for item in envelope.items:
+                metadata = item.context.metadata or {}
+                start_time = metadata.get("segment_start")
+                end_time = metadata.get("segment_end")
+                if end_time:
+                    timestamps.append(float(end_time))
+                elif start_time:
+                    timestamps.append(float(start_time))
+
+            if timestamps:
+                start_time = int(min(timestamps))
+                end_time = int(max(timestamps))
+            else:
+                # Fallback to current time if no timestamps found
+                import time
+                current_time = int(time.time())
+                start_time = current_time - 3600  # 1 hour ago
+                end_time = current_time
+        else:
+            raise HTTPException(status_code=404, detail="no content found in timeline")
+
+        # Generate intelligent report
+        async def generate_report():
+            generator = ReportGenerator(glass_source=GlassContextSource())
+            return await generator.generate_report(
+                start_time,
+                end_time,
+                timeline_id=timeline_id,
+            )
+
+        # Run async function in sync context
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            intelligent_report = loop.run_until_complete(generate_report())
+        finally:
+            loop.close()
+
+        if intelligent_report:
+            # Save the intelligent report as auto_markdown with a special marker
+            repository.upsert_daily_report(
+                timeline_id=timeline_id,
+                manual_markdown=intelligent_report,  # Store in manual_markdown for persistence
+                manual_metadata={"generation_method": "intelligent_llm"},
+                rendered_html="",
+            )
+
+            return convert_resp({
+                "timeline_id": timeline_id,
+                "status": "completed"
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Report generation returned empty content")
+
+    except Exception as exc:
+        logger.exception(f"Failed to generate intelligent report: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to regenerate report: {exc}") from exc
 
 
 def _safe_status_lookup(ingestion: GlassIngestionService, timeline_id: str) -> IngestionStatus:

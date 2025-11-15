@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import sqlite3
+import time
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -303,6 +304,45 @@ class GlassContextRepository:
                 "DELETE FROM glass_daily_reports WHERE timeline_id = ?",
                 (timeline_id,),
             )
+
+    def get_all_timelines(self) -> List[dict]:
+        """Get all available timelines with basic metadata."""
+        with self._transaction(readonly=True) as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    t1.timeline_id,
+                    t1.modality,
+                    t1.created_at,
+                    t1.updated_at,
+                    t2.manual_markdown IS NOT NULL as has_report,
+                    t1.context_type
+                FROM glass_multimodal_context t1
+                LEFT JOIN glass_daily_reports t2 ON t1.timeline_id = t2.timeline_id
+                GROUP BY t1.timeline_id
+                ORDER BY t1.created_at DESC
+                """
+            )
+            rows = cursor.fetchall()
+
+        timelines = []
+        for row in rows:
+            timeline_id = row["timeline_id"]
+            filename = timeline_id  # Default to timeline_id as filename
+
+            created_at = _parse_sqlite_timestamp(row["created_at"])
+            started_at = int(created_at.timestamp() * 1000) if created_at else int(time.time() * 1000)
+
+            timelines.append({
+                "timeline_id": timeline_id,
+                "filename": filename,
+                "status": "completed",  # Since it's in the database, assume completed
+                "started_at": started_at,
+                "has_report": bool(row["has_report"]),
+                "context_type": row["context_type"]
+            })
+
+        return timelines
 
     def _resolve_storage(self) -> UnifiedStorage:
         storage = get_global_storage().get_storage()
