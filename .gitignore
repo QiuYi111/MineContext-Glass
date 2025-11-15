@@ -18,3 +18,11 @@ uv.lock
 /config/config.yaml
 glass/webui/node_modules/
 glass/webui/dist/
+webui/node_modules/
+webui/dist/
+webui/.vite/
+webui/.env
+webui/.env.local
+webui/.env.development.local
+webui/.env.test.local
+webui/.env.production.local
