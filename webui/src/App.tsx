@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 
-import { fetchDailyReport, fetchStatus, fetchUploadLimits, generateDailyReport, saveDailyReport, uploadVideo } from "./api";
+import { fetchDailyReport, fetchStatus, fetchTimelines, fetchUploadLimits, generateDailyReport, saveDailyReport, uploadVideo } from "./api";
 import type { DailyReport, UploadLimits } from "./types";
 import type { TimelineEntry } from "./components/TimelineBoard";
+import type { TimelineEntry as ApiTimelineEntry } from "./api";
 import Header from "./components/Header";
 import UploadPanel from "./components/UploadPanel";
 import TimelineBoard from "./components/TimelineBoard";
@@ -37,27 +38,79 @@ const App = (): JSX.Element => {
 
   const clearToast = useCallback(() => setToast(null), []);
 
+  // Convert API timeline entry format to component format
+  const convertApiTimelineToEntry = useCallback((apiTimeline: ApiTimelineEntry): TimelineEntry => ({
+    timelineId: apiTimeline.timeline_id,
+    filename: apiTimeline.filename,
+    status: apiTimeline.status as TimelineEntry["status"],
+    startedAt: apiTimeline.started_at,
+  }), []);
+
+  // Load historical data on startup
+  const loadHistoricalData = useCallback(async () => {
+    try {
+      const timelines = await fetchTimelines();
+      const entries = timelines.map(convertApiTimelineToEntry);
+      setUploads(entries);
+      console.log(`Loaded ${entries.length} historical timelines`);
+    } catch (error) {
+      console.error("Failed to load historical data:", error);
+      // Don't show toast for this error on startup to avoid annoying users
+    }
+  }, [convertApiTimelineToEntry]);
+
+  // Save state to localStorage (only save manual markdown, not timeline selection)
+  const saveStateToStorage = useCallback(() => {
+    try {
+      localStorage.setItem('glass-manual-markdown', manualMarkdown);
+    } catch (error) {
+      console.warn('Failed to save state to localStorage:', error);
+    }
+  }, [manualMarkdown]);
+
+  // Load state from localStorage (only restore manual markdown, not timeline selection)
+  const loadStateFromStorage = useCallback(() => {
+    try {
+      const savedMarkdown = localStorage.getItem('glass-manual-markdown');
+
+      // Only restore manual markdown, let user actively select timeline
+      if (savedMarkdown) {
+        setManualMarkdown(savedMarkdown);
+      }
+    } catch (error) {
+      console.warn('Failed to load state from localStorage:', error);
+    }
+  }, []);
+
+  // Save state when it changes
+  useEffect(() => {
+    saveStateToStorage();
+  }, [saveStateToStorage]);
+
   useEffect(() => {
     void (async () => {
       try {
-        const data = await fetchUploadLimits();
-        setLimits(data);
+        // Load upload limits first
+        const limitsData = await fetchUploadLimits();
+        setLimits(limitsData);
+
+        // Load state from localStorage
+        loadStateFromStorage();
+
+        // Then load historical data
+        await loadHistoricalData();
       } catch (error) {
         console.error(error);
-        showToast((error as Error).message ?? "无法获取上传限制", "error");
+        showToast((error as Error).message ?? "初始化失败", "error");
       }
     })();
     return () => {
       pollingHandles.current.forEach((id) => clearTimeout(id));
       pollingHandles.current.clear();
     };
-  }, [showToast]);
+  }, [showToast, loadHistoricalData, loadStateFromStorage]);
 
-  useEffect(() => {
-    if (!selectedTimeline && uploads.length > 0) {
-      setSelectedTimeline(uploads[0].timelineId);
-    }
-  }, [uploads, selectedTimeline]);
+  // Removed automatic timeline selection to require user action
 
   const selectedEntry = useMemo(
     () => uploads.find((item) => item.timelineId === selectedTimeline) ?? null,

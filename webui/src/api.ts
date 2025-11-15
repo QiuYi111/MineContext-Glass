@@ -35,6 +35,24 @@ export async function fetchUploadLimits(): Promise<UploadLimits> {
   return payload.data;
 }
 
+export interface TimelineEntry {
+  timeline_id: string;
+  filename: string;
+  status: string;
+  started_at: number;
+  has_report?: boolean;
+  context_type?: string;
+}
+
+export async function fetchTimelines(): Promise<TimelineEntry[]> {
+  const response = await fetch(buildUrl("/glass/timelines"), {
+    headers: jsonHeaders,
+    credentials: "include",
+  });
+  const payload = await parseJson<{ data: TimelineEntry[] }>(response);
+  return payload.data;
+}
+
 export async function uploadVideo(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
