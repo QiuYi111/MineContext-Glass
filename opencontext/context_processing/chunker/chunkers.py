@@ -213,7 +213,7 @@ class StructuredFileChunker(BaseChunker):
                     continue
 
                 # Convert to text representation with headers
-                text_content = df_chunk.to_string()
+                text_content = df_chunk.write_csv()
 
                 # Create metadata
                 metadata = {
@@ -259,7 +259,7 @@ class StructuredFileChunker(BaseChunker):
                     df_chunk = df.slice(start_idx, end_idx - start_idx)
 
                     # Convert to text with headers
-                    text_content = df_chunk.to_string()
+                    text_content = df_chunk.write_csv()
 
                     metadata = {
                         'file_type': 'excel',
