@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MineContext API Connector</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #f8f9fa;
+      color: #1a1a1a;
+      font-size: 12px;
+    }
+
+    .container {
+      max-width: 100%;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #e1e4e8;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #24292e;
+    }
+
+    .section {
+      margin-bottom: 16px;
+      padding: 12px;
+      background: white;
+      border-radius: 6px;
+      border: 1px solid #e1e4e8;
+    }
+
+    .section h3 {
+      margin: 0 0 8px 0;
+      font-size: 13px;
+      font-weight: 600;
+      color: #24292e;
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #586069;
+    }
+
+    .form-group input, .form-group select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #d1d5da;
+      border-radius: 4px;
+      font-size: 12px;
+      box-sizing: border-box;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 8px 12px;
+      background: #0366d6;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .btn:hover {
+      background: #0256cc;
+    }
+
+    .btn:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    .btn-secondary {
+      background: #f6f8fa;
+      color: #24292e;
+      border: 1px solid #d1d5da;
+    }
+
+    .btn-secondary:hover {
+      background: #e1e4e8;
+    }
+
+    .file-upload {
+      position: relative;
+      display: inline-block;
+      width: 100%;
+    }
+
+    .file-upload input[type="file"] {
+      position: absolute;
+      left: -9999px;
+    }
+
+    .file-upload label {
+      display: block;
+      padding: 8px 12px;
+      background: #28a745;
+      color: white;
+      border-radius: 4px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      transition: background-color 0.2s;
+    }
+
+    .file-upload label:hover {
+      background: #218838;
+    }
+
+    .timeline-list {
+      max-height: 150px;
+      overflow-y: auto;
+      border: 1px solid #e1e4e8;
+      border-radius: 4px;
+      padding: 8px;
+      margin-top: 8px;
+      background: #fafbfc;
+    }
+
+    .timeline-item {
+      padding: 6px 8px;
+      margin-bottom: 4px;
+      background: white;
+      border: 1px solid #e1e4e8;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .timeline-item:hover {
+      background: #f6f8fa;
+    }
+
+    .timeline-item.selected {
+      background: #e1f5fe;
+      border-color: #0366d6;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 500;
+      margin-left: 8px;
+    }
+
+    .status.completed { background: #d4edda; color: #155724; }
+    .status.processing { background: #fff3cd; color: #856404; }
+    .status.failed { background: #f8d7da; color: #721c24; }
+
+    .log {
+      margin-top: 12px;
+      padding: 8px;
+      background: #f6f8fa;
+      border: 1px solid #e1e4e8;
+      border-radius: 4px;
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 10px;
+      max-height: 120px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .error { color: #cb2431; }
+    .success { color: #28a745; }
+    .info { color: #0366d6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>MineContext API Connector</h1>
+      <p style="margin: 4px 0 0 0; color: #586069; font-size: 11px;">
+        连接Figma与MineContext Glass后端
+      </p>
+    </div>
+
+    <!-- API配置 -->
+    <div class="section">
+      <h3>🔧 API 配置</h3>
+      <div class="form-group">
+        <label for="apiBase">后端API地址:</label>
+        <input type="text" id="apiBase" value="http://localhost:8000" placeholder="http://localhost:8000">
+      </div>
+      <button class="btn btn-secondary" onclick="updateApiBase()">更新API地址</button>
+    </div>
+
+    <!-- 视频上传 -->
+    <div class="section">
+      <h3>📹 视频上传</h3>
+      <div class="file-upload">
+        <input type="file" id="videoFile" accept="video/*" onchange="handleVideoUpload()">
+        <label for="videoFile">选择视频文件</label>
+      </div>
+    </div>
+
+    <!-- 时间线管理 -->
+    <div class="section">
+      <h3>📅 时间线管理</h3>
+      <button class="btn btn-secondary" onclick="loadTimelines()" style="margin-bottom: 8px;">加载时间线列表</button>
+      <div id="timelineList" class="timeline-list" style="display: none;">
+        <p style="margin: 0; color: #586069; text-align: center;">点击时间线选择</p>
+      </div>
+    </div>
+
+    <!-- 日报操作 -->
+    <div class="section">
+      <h3>📊 日报操作</h3>
+      <div class="form-group">
+        <label>已选择时间线: <span id="selectedTimeline" style="color: #0366d6;">无</span></label>
+      </div>
+      <button class="btn btn-secondary" onclick="loadReport()" style="margin-bottom: 8px;">获取日报</button>
+      <button class="btn" onclick="generateReport()" id="generateBtn" disabled>生成新日报</button>
+    </div>
+
+    <!-- 操作日志 -->
+    <div class="section">
+      <h3>📝 操作日志</h3>
+      <div id="log" class="log">等待操作...</div>
+    </div>
+  </div>
+
+  <script>
+    let selectedTimelineId = null;
+    let logs = [];
+
+    // 日志记录
+    function log(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const logMessage = `[${timestamp}] ${message}`;
+      logs.push(logMessage);
+
+      const logElement = document.getElementById('log');
+      logElement.innerHTML = logs.map(log => {
+        const className = log.includes('错误') ? 'error' :
+                         log.includes('成功') ? 'success' : 'info';
+        return `<div class="${className}">${log}</div>`;
+      }).join('');
+
+      logElement.scrollTop = logElement.scrollHeight;
+      console.log(logMessage);
+    }
+
+    // 更新API基础地址
+    function updateApiBase() {
+      const apiBase = document.getElementById('apiBase').value;
+      parent.postMessage({ pluginMessage: { type: 'update-api-base', apiBase } }, '*');
+      log(`API地址更新为: ${apiBase}`);
+    }
+
+    // 处理视频上传
+    async function handleVideoUpload() {
+      const fileInput = document.getElementById('videoFile');
+      const file = fileInput.files[0];
+
+      if (!file) {
+        log('请选择视频文件', 'error');
+        return;
+      }
+
+      log(`准备上传视频: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`${document.getElementById('apiBase').value}/glass/upload`, {
+          method: 'POST',
+          body: formData,
+          credentials: 'include'
+        });
+
+        if (!response.ok) {
+          throw new Error(`上传失败: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        log(`视频上传成功! Timeline ID: ${result.data.timeline_id}`, 'success');
+
+        // 清空文件选择
+        fileInput.value = '';
+
+        // 自动刷新时间线列表
+        setTimeout(loadTimelines, 1000);
+
+      } catch (error) {
+        log(`视频上传失败: ${error.message}`, 'error');
+      }
+    }
+
+    // 加载时间线列表
+    async function loadTimelines() {
+      log('加载时间线列表...');
+
+      try {
+        const response = await fetch(`${document.getElementById('apiBase').value}/glass/timelines`, {
+          credentials: 'include'
+        });
+
+        if (!response.ok) {
+          throw new Error(`加载失败: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        const timelines = result.data;
+
+        log(`成功加载 ${timelines.length} 条时间线`, 'success');
+
+        // 更新UI
+        const timelineList = document.getElementById('timelineList');
+        timelineList.style.display = 'block';
+        timelineList.innerHTML = '';
+
+        timelines.forEach(timeline => {
+          const item = document.createElement('div');
+          item.className = 'timeline-item';
+          item.onclick = () => selectTimeline(timeline);
+
+          const statusClass = timeline.status;
+          item.innerHTML = `
+            <div>${timeline.filename}</div>
+            <div style="font-size: 10px; color: #586069; margin-top: 2px;">
+              ${timeline.timeline_id}
+              <span class="status ${statusClass}">${timeline.status.toUpperCase()}</span>
+            </div>
+          `;
+
+          timelineList.appendChild(item);
+        });
+
+      } catch (error) {
+        log(`加载时间线失败: ${error.message}`, 'error');
+      }
+    }
+
+    // 选择时间线
+    function selectTimeline(timeline) {
+      selectedTimelineId = timeline.timeline_id;
+      document.getElementById('selectedTimeline').textContent = timeline.filename;
+      document.getElementById('generateBtn').disabled = timeline.status !== 'completed';
+
+      // 更新UI选中状态
+      document.querySelectorAll('.timeline-item').forEach(item => {
+        item.classList.remove('selected');
+      });
+      event.currentTarget.classList.add('selected');
+
+      log(`选择时间线: ${timeline.filename} (${timeline.timeline_id})`);
+    }
+
+    // 加载日报
+    async function loadReport() {
+      if (!selectedTimelineId) {
+        log('请先选择一个时间线', 'error');
+        return;
+      }
+
+      log(`加载时间线 ${selectedTimelineId} 的日报...`);
+
+      try {
+        const response = await fetch(`${document.getElementById('apiBase').value}/glass/report/${selectedTimelineId}`, {
+          credentials: 'include'
+        });
+
+        if (!response.ok) {
+          throw new Error(`加载失败: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        const report = result.data;
+
+        log(`日报加载成功! 包含 ${report.highlights?.length || 0} 个高亮点`, 'success');
+
+        // 可以在这里展示报告内容...
+        console.log('Report data:', report);
+
+      } catch (error) {
+        log(`加载日报失败: ${error.message}`, 'error');
+      }
+    }
+
+    // 生成日报
+    async function generateReport() {
+      if (!selectedTimelineId) {
+        log('请先选择一个时间线', 'error');
+        return;
+      }
+
+      log(`为时间线 ${selectedTimelineId} 生成新日报...`);
+
+      try {
+        const response = await fetch(`${document.getElementById('apiBase').value}/glass/report/${selectedTimelineId}/generate`, {
+          method: 'POST',
+          credentials: 'include'
+        });
+
+        if (!response.ok) {
+          throw new Error(`生成失败: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        log(`日报生成任务已提交! 状态: ${result.data.status}`, 'success');
+
+      } catch (error) {
+        log(`生成日报失败: ${error.message}`, 'error');
+      }
+    }
+
+    // 监听来自插件代码的消息
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (msg) {
+        switch (msg.type) {
+          case 'limits-result':
+            log(`配额信息: ${JSON.stringify(msg.data)}`, 'success');
+            break;
+          case 'timelines-result':
+            log(`时间线列表: ${msg.data.length} 条`, 'success');
+            break;
+          case 'report-result':
+            log(`日报数据: ${msg.data.highlights?.length || 0} 个高亮点`, 'success');
+            break;
+          case 'generate-result':
+            log(`生成任务: ${msg.data.timeline_id}`, 'success');
+            break;
+          case 'error':
+            log(`错误: ${msg.error}`, 'error');
+            break;
+        }
+      }
+    };
+
+    // 初始化
+    log('MineContext API Connector 已启动');
+  </script>
+</body>
+</html>

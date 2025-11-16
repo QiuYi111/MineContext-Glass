@@ -1,0 +1,25 @@
+{
+  "name": "minecontext-figma-plugin",
+  "version": "1.0.0",
+  "description": "Figma plugin for connecting to MineContext Glass backend API",
+  "main": "code.js",
+  "scripts": {
+    "build": "npm run build:css && npm run build:js",
+    "build:css": "echo 'CSS不需要构建，直接使用'",
+    "build:js": "echo 'JS不需要构建，直接使用'",
+    "watch": "echo '使用Figma的开发模式自动重载'",
+    "dev": "echo '在Figma中打开Plugins > Development > Import plugin from manifest...'"
+  },
+  "keywords": [
+    "figma",
+    "plugin",
+    "api",
+    "minecontext",
+    "video",
+    "upload"
+  ],
+  "author": "MineContext Team",
+  "license": "MIT",
+  "devDependencies": {},
+  "dependencies": {}
+}

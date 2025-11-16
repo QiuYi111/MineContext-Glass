@@ -65,7 +65,14 @@ app = FastAPI(title="OpenContext", version="1.0.0", lifespan=lifespan)
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174", "http://localhost"],  # React dev server
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost",
+        "https://www.figma.com",  # Figma web editor
+        "https://figma.com",       # Figma desktop
+        "file://",                # Figma desktop local files
+    ],  # React dev server + Figma
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

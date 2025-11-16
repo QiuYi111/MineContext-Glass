@@ -17,7 +17,7 @@ from typing import List, Dict, Any, Tuple, Optional, Iterator, Generator
 import re
 from functools import lru_cache
 
-import pandas as pd
+import polars as pl
 
 from opencontext.utils.logging_utils import get_logger
 from opencontext.models.context import RawContextProperties, Chunk
@@ -200,23 +200,29 @@ class StructuredFileChunker(BaseChunker):
         try:
             chunk_size = self.config.batch_size
             chunk_idx = 0
-            
-            # Read CSV in chunks
-            for df_chunk in pd.read_csv(file_path, chunksize=chunk_size):
-                if df_chunk.empty:
+
+            # Read CSV in chunks using polars
+            df = pl.read_csv(file_path)
+            total_rows = len(df)
+
+            for start_idx in range(0, total_rows, chunk_size):
+                end_idx = min(start_idx + chunk_size, total_rows)
+                df_chunk = df.slice(start_idx, end_idx - start_idx)
+
+                if df_chunk.is_empty():
                     continue
-                    
+
                 # Convert to text representation with headers
-                text_content = df_chunk.to_string(index=False)
-                
+                text_content = df_chunk.to_string()
+
                 # Create metadata
                 metadata = {
                     'file_type': 'csv',
                     'chunk_rows': len(df_chunk),
-                    'columns': list(df_chunk.columns),
+                    'columns': df_chunk.columns,
                     'file_path': str(file_path)
                 }
-                
+
                 yield Chunk(
                     text=text_content,
                     chunk_index=chunk_idx,
@@ -224,46 +230,46 @@ class StructuredFileChunker(BaseChunker):
                     title=f"CSV Chunk {chunk_idx + 1}",
                     summary=f"CSV data with {len(df_chunk)} rows and {len(df_chunk.columns)} columns",
                     semantic_type="structured_data",
-                    keywords=list(df_chunk.columns),  # Column names as keywords
+                    keywords=df_chunk.columns,  # Column names as keywords
                     metadata=metadata
                 )
-                
+
                 chunk_idx += 1
-                
+
         except Exception as e:
             logger.exception(f"Error streaming CSV file {file_path}: {e}")
 
     def _chunk_excel_streaming(self, file_path: Path, context: RawContextProperties) -> Iterator[Chunk]:
         """Stream Excel file in chunks"""
         try:
-            # Read all sheets
-            excel_file = pd.ExcelFile(file_path)
+            # Read all sheets using polars
+            excel_file = pl.read_excel(file_path, sheet_id=None)  # Read all sheets
             chunk_idx = 0
-            
-            for sheet_name in excel_file.sheet_names:
-                df = pd.read_excel(excel_file, sheet_name=sheet_name)
-                
-                if df.empty:
+
+            for sheet_name, df in excel_file.items():
+                if df.is_empty():
                     continue
-                
+
                 # Split large sheets into smaller chunks
                 chunk_size = self.config.batch_size
-                for start_idx in range(0, len(df), chunk_size):
-                    end_idx = min(start_idx + chunk_size, len(df))
-                    df_chunk = df.iloc[start_idx:end_idx]
-                    
+                total_rows = len(df)
+
+                for start_idx in range(0, total_rows, chunk_size):
+                    end_idx = min(start_idx + chunk_size, total_rows)
+                    df_chunk = df.slice(start_idx, end_idx - start_idx)
+
                     # Convert to text with headers
-                    text_content = df_chunk.to_string(index=False)
-                    
+                    text_content = df_chunk.to_string()
+
                     metadata = {
                         'file_type': 'excel',
                         'sheet_name': sheet_name,
                         'chunk_rows': len(df_chunk),
-                        'columns': list(df_chunk.columns),
+                        'columns': df_chunk.columns,
                         'row_range': (start_idx, end_idx - 1),
                         'file_path': str(file_path)
                     }
-                    
+
                     yield Chunk(
                         text=text_content,
                         chunk_index=chunk_idx,
@@ -271,12 +277,12 @@ class StructuredFileChunker(BaseChunker):
                         title=f"Excel {sheet_name} Chunk {chunk_idx + 1}",
                         summary=f"Excel sheet '{sheet_name}' rows {start_idx}-{end_idx-1}",
                         semantic_type="structured_data",
-                        keywords=list(df_chunk.columns),  # Column names as keywords
+                        keywords=df_chunk.columns,  # Column names as keywords
                         metadata=metadata
                     )
-                    
+
                     chunk_idx += 1
-                    
+
         except Exception as e:
             logger.exception(f"Error streaming Excel file {file_path}: {e}")
 

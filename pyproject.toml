@@ -25,7 +25,7 @@ dependencies = [
     "pydantic",
     "loguru",
     "pyyaml",
-    "pandas",
+    "polars",
     "fastapi",
     "python-multipart",
     "uvicorn",
@@ -43,6 +43,7 @@ dependencies = [
     "requests",
     "markdown-it-py",
     "bleach",
+    "keyring",
 ]
 
 [project.scripts]
