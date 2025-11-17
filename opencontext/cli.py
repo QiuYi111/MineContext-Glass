@@ -30,6 +30,7 @@ from opencontext.server.opencontext import OpenContext
 from opencontext.server.api import router as api_router
 from opencontext.config.config_manager import ConfigManager
 from opencontext.utils.logging_utils import setup_logging, get_logger
+from glass.utils.chromadb_manager import preload_chromadb_model
 
 logger = get_logger(__name__)
 
@@ -265,17 +266,27 @@ def parse_args() -> argparse.Namespace:
 
 def _initialize_context_lab(config_path: Optional[str]) -> OpenContext:
     """Initialize the OpenContext instance.
-    
+
     Args:
         config_path: Optional path to configuration file
-        
+
     Returns:
         Initialized OpenContext instance
-        
+
     Raises:
         RuntimeError: If initialization fails
     """
     try:
+        # 启动ChromaDB模型预下载
+        logger.info("启动ChromaDB模型预下载...")
+        def on_preload_complete(success: bool):
+            if success:
+                logger.info("✅ ChromaDB模型预下载完成")
+            else:
+                logger.warning("⚠️ ChromaDB模型预下载失败，将在首次使用时下载")
+
+        preload_chromadb_model(callback=on_preload_complete)
+
         lab_instance = OpenContext(config_path=config_path)
         lab_instance.initialize()
         return lab_instance

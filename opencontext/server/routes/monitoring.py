@@ -15,6 +15,8 @@ from opencontext.server.opencontext import OpenContext
 from opencontext.monitoring import get_monitor
 from opencontext.server.middleware.auth import auth_dependency
 from datetime import timedelta
+from glass.utils.chromadb_manager import get_chromadb_manager
+from glass.ingestion.ffmpeg_runner import verify_ffmpeg_installation, FFmpegNotFoundError
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
 
@@ -166,6 +168,57 @@ async def monitoring_health(
             "data": {
                 "monitor_active": True,
                 "uptime_seconds": uptime_seconds
+            }
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/chromadb-status")
+async def get_chromadb_status(
+    _auth: str = auth_dependency
+):
+    """
+    Get ChromaDB model status and download progress
+    """
+    try:
+        manager = get_chromadb_manager()
+        model_info = manager.get_model_info()
+
+        return {
+            "success": True,
+            "data": {
+                "model_name": model_info["model_name"],
+                "model_dir": model_info["model_dir"],
+                "downloaded": model_info["downloaded"],
+                "preloading": model_info["preloading"],
+                "model_size_mb": model_info.get("model_size_mb", 0),
+                "status": "ready" if model_info["downloaded"] else "downloading" if model_info["preloading"] else "not_started"
+            }
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/ffmpeg-status")
+async def get_ffmpeg_status(
+    _auth: str = auth_dependency
+):
+    """
+    Get FFmpeg installation status and capabilities
+    """
+    try:
+        verification = verify_ffmpeg_installation()
+
+        return {
+            "success": True,
+            "data": {
+                "available": verification["available"],
+                "version": verification["version"],
+                "codecs": verification["codecs"],
+                "error": verification["error"],
+                "status": "ready" if verification["available"] else "not_installed",
+                "install_guide": verification.get("install_guide")
             }
         }
     except Exception as e:

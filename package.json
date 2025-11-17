@@ -1,0 +1,57 @@
+{
+  "name": "minecontext-glass",
+  "version": "1.0.0",
+  "description": "MineContext Glass - A glasses-first personal context platform",
+  "main": "electron/main.js",
+  "scripts": {
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm run dev\" \"npm run electron\"",
+    "dev": "cd webui && npm run dev",
+    "build": "npm run build-frontend && npm run build-backend && npm run build-electron",
+    "build-frontend": "cd webui && npm run build",
+    "build-backend": "pyinstaller --onefile --name backend backend/main.py",
+    "build-electron": "electron-builder",
+    "start": "npm run electron-dev",
+    "clean": "rm -rf build dist electron/dist backend/dist"
+  },
+  "keywords": [
+    "electron",
+    "react",
+    "python",
+    "glass",
+    "context",
+    "ai"
+  ],
+  "author": "MineContext Team",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "electron": "^28.1.0",
+    "electron-builder": "^24.6.4",
+    "concurrently": "^8.2.2"
+  },
+  "build": {
+    "appId": "com.minecontext.glass",
+    "productName": "MineContext Glass",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "webui/dist/**/*",
+      "backend/backend",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+    ],
+    "extraResources": [
+      {
+        "from": "signatures",
+        "to": "signatures"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/app.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    }
+  }
+}

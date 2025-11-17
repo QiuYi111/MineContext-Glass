@@ -120,3 +120,52 @@ export async function generateDailyReport(timelineId: string): Promise<GenerateR
   const payload = await parseJson<{ data: GenerateReportResponse }>(response);
   return payload.data;
 }
+
+export interface ChromaDBStatus {
+  model_name: string;
+  model_dir: string;
+  downloaded: boolean;
+  preloading: boolean;
+  model_size_mb: number;
+  status: "ready" | "downloading" | "not_started";
+}
+
+export interface FFmpegStatus {
+  available: boolean;
+  version: string | null;
+  codecs: string[];
+  error: string | null;
+  status: "ready" | "not_installed";
+  install_guide?: string;
+}
+
+export interface SystemStatus {
+  chromadb: ChromaDBStatus;
+  ffmpeg: FFmpegStatus;
+}
+
+export async function fetchChromaDBStatus(): Promise<ChromaDBStatus> {
+  const response = await fetch(buildUrl("/api/monitoring/chromadb-status"), {
+    headers: jsonHeaders,
+    credentials: "include",
+  });
+  const payload = await parseJson<{ data: ChromaDBStatus }>(response);
+  return payload.data;
+}
+
+export async function fetchFFmpegStatus(): Promise<FFmpegStatus> {
+  const response = await fetch(buildUrl("/api/monitoring/ffmpeg-status"), {
+    headers: jsonHeaders,
+    credentials: "include",
+  });
+  const payload = await parseJson<{ data: FFmpegStatus }>(response);
+  return payload.data;
+}
+
+export async function fetchSystemStatus(): Promise<SystemStatus> {
+  const [chromadb, ffmpeg] = await Promise.all([
+    fetchChromaDBStatus(),
+    fetchFFmpegStatus(),
+  ]);
+  return { chromadb, ffmpeg };
+}

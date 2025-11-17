@@ -1,359 +1,705 @@
-# MineContext-Glass macOS App实施计划
+# MineContext-Glass macOS App实施计划 (更新版)
 
-## 最终决策：原生.app路线
+## 🔴 重大发现：原方案存在根本性问题
 
-**决策依据**：基于数据验证，修正技术负责人原评估偏差
-- ChromaDB依赖：125MB（原评估800MB+，误差-85%）
-- 总包体积：583MB（可接受）
-- 基础启动：0.41秒（原评估5-10秒，优化-90%）
+### ❌ 原方案问题评估
+**实际构建结果**：PyInstaller生成的是**命令行工具**，不是GUI应用
+- 前端：React需要独立启动 (npm run dev → http://localhost:5174)
+- 后端：FastAPI需要独立启动 (opencontext start → http://localhost:8001)
+- "GUI应用"：实际上只是CLI工具，无法双击启动
 
-**核心策略**：FFmpeg外置 + ChromaDB延迟加载，3周交付MVP
+**核心问题**：
+- 前后端完全分离，需要手动启动两个服务
+- 用户体验：开发者模式，不是原生GUI应用
+- 架构错误：Web应用架构，不是桌面应用架构
 
----
+## ✅ 新方案：Electron + Python混合架构
 
-## 技术架构决策
+**决策依据**：
+- React前端代码90%可复用，无需重写
+- Python后端已完善，只需服务化改造
+- Electron提供真正的桌面应用体验
+- 开发周期短，风险可控
 
-### 1. FFmpeg处理方案
-**决策**：不打包，外置依赖
-- **实现**：启动时自动检测Homebrew安装路径
-- **用户引导**：未安装时弹窗提供一键安装指导
-- **开发状态**：✅ 已完成（`glass/ingestion/ffmpeg_runner.py`）
-
-### 2. ChromaDB优化方案
-**决策**：延迟加载 + 后台预下载
-- **问题解决**：79.3MB ONNX模型首次下载阻塞问题
-- **实现方式**：首次使用时才初始化，后台线程预下载
-- **开发状态**：✅ 已完成（`glass/utils/chromadb_manager.py`）
-
-### 3. 依赖优化方案
-**决策**：移除重型依赖，保留核心功能
-- **pandas** → **polars**（已完成）
-- 移除开发依赖（pytest, jupyter等）
-- 目标.app包体积 < 300MB
-
-### 4. 法律风险处理
-**策略**：法务评估 + 风险转移
-- **FFmpeg专利**：法务本周完成MPEG LA授权评估
-- **年收入<10万美元**：可能获得专利豁免
-- **备选方案**：考虑使用系统VideoToolbox框架
+**核心策略**：Electron包装 + Python后端嵌入 + React前端集成
 
 ---
 
-## 三周交付计划
+## 新技术架构决策
 
-### Week 1：核心功能集成（2025-11-17 至 2025-11-23）
+### 1. Electron主进程架构
+**决策**：Electron主进程 + Python后端子进程 + React渲染进程
+- **主进程**：创建窗口，管理Python后端进程
+- **渲染进程**：React前端界面
+- **后端进程**：Python FastAPI服务
+- **开发状态**：🔄 待实施
 
-**Day 1-2：ChromaDB集成**
-- [ ] 替换所有直接`import chromadb`为延迟加载
-- [ ] 集成`glass/utils/chromadb_manager.py`到现有代码
-- [ ] 添加启动时的模型预下载机制
-- [ ] 实现模型下载进度显示
+### 2. Python后端服务化
+**决策**：将现有后端改造为可编程启动
+- **实现方式**：创建独立启动入口，支持动态端口分配
+- **进程管理**：Electron主进程管理Python子进程生命周期
+- **通信机制**：HTTP API + IPC桥接
+- **开发状态**：✅ 基础功能已完善，需要服务化改造
 
-**关键文件修改**：
-```python
-# glass/storage/context_repository.py
-- import chromadb
-+ from glass.utils.chromadb_manager import lazy_get_collection
+### 3. 前端集成适配
+**决策**：React前端适配Electron环境
+- **环境检测**：区分开发/生产/Electron环境
+- **API调用适配**：动态配置API基础URL
+- **系统集成**：菜单、快捷键、文件访问等
+- **开发状态**：✅ 前端功能完善，需要Electron适配
 
-# opencontext/context_processing/processor/*.py
-- import chromadb
-+ from glass.utils.chromadb_manager import lazy_get_collection
+### 4. 构建打包方案
+**决策**：electron-builder + PyInstaller混合构建
+- **前端构建**：Vite构建React生产版本
+- **后端构建**：PyInstaller打包Python可执行文件
+- **Electron打包**：electron-builder整合所有组件
+- **目标包体积**：<200MB（包含Python运行时）
+
+---
+
+## 新三周交付计划
+
+### Week 1：Electron基础架构搭建（2025-11-17 至 2025-11-23）
+
+**Day 1-2：项目结构重组**
+- [ ] 创建Electron项目结构
+- [ ] 设置package.json和依赖管理
+- [ ] 配置开发和构建环境
+- [ ] 验证现有前后端功能
+
+**目录结构**：
+```
+MineContext-Glass/
+├── electron/                 # 新增：Electron主进程
+│   ├── main.js             # 主进程入口
+│   ├── preload.js          # 预加载脚本
+│   └── menu.js             # 应用菜单
+├── webui/                  # 现有：React前端（保持不变）
+├── backend/                # 重构：Python后端
+│   ├── main.py            # 后端服务入口
+│   └── api/               # API模块
+└── scripts/               # 新增：构建脚本
+    └── build-electron.js
 ```
 
-**Day 3-4：FFmpeg检测集成**
-- [ ] 集成`glass/ingestion/ffmpeg_runner.py`到视频处理管道
-- [ ] 添加FFmpeg安装状态检测UI
-- [ ] 实现友好的错误提示和安装指引
-- [ ] 添加编解码器功能验证
+**Day 3-4：Python后端服务化**
+- [ ] 创建Python后端独立启动入口
+- [ ] 实现动态端口分配
+- [ ] 添加健康检查机制
+- [ ] 测试后端独立运行
 
-**关键文件修改**：
+**后端服务化代码**：
 ```python
-# glass/ingestion/service.py
-- from glass.ingestion.ffmpeg_runner import FFmpegRunner
-+ from glass.ingestion.ffmpeg_runner import FFmpegRunner, FFmpegNotFoundError
+# backend/main.py
+import uvicorn
+import threading
+import time
+from opencontext.cli import main as opencontext_main
 
-# 添加异常处理和用户指引
+class GlassBackend:
+    def __init__(self):
+        self.server = None
+        self.port = None
+
+    def start(self):
+        # 动态端口分配
+        import socket
+        sock = socket.socket()
+        sock.bind(('', 0))
+        self.port = sock.getsockname()[1]
+        sock.close()
+
+        # 启动服务器
+        import sys
+        sys.argv = ['opencontext', 'start', f'--port={self.port}', '--no-capture']
+        opencontext_main()
+
+if __name__ == "__main__":
+    backend = GlassBackend()
+    backend.start()
 ```
 
-**Day 5-7：基础打包测试**
-- [ ] PyInstaller配置开发（`build.spec`）
-- [ ] 最小可行性.app构建
-- [ ] 启动测试和性能验证
-- [ ] 依赖大小和启动时间基线测试
+**Day 5-7：Electron主进程开发**
+- [ ] 创建主进程窗口管理
+- [ ] 实现Python后端进程启动
+- [ ] 配置IPC通信机制
+- [ ] 集成React前端加载
+
+**Electron主进程代码**：
+```javascript
+// electron/main.js
+const { app, BrowserWindow, ipcMain } = require('electron');
+const { spawn } = require('child_process');
+const path = require('path');
+
+let mainWindow;
+let backendProcess;
+
+function createWindow() {
+    mainWindow = new BrowserWindow({
+        width: 1200, height: 800,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        }
+    });
+
+    // 启动Python后端
+    startBackend();
+
+    // 加载前端（开发模式）或生产构建
+    if (process.env.NODE_ENV === 'development') {
+        mainWindow.loadURL('http://localhost:5174');
+    } else {
+        mainWindow.loadFile(path.join(__dirname, '../webui/dist/index.html'));
+    }
+}
+
+function startBackend() {
+    backendProcess = spawn('python3', [
+        path.join(__dirname, '../backend/main.py')
+    ]);
+
+    backendProcess.stdout.on('data', (data) => {
+        console.log(`Backend: ${data}`);
+    });
+}
+```
 
 **预期产出**：
-- 可运行的未签名.app文件
-- 性能测试报告（启动时间、内存占用）
-- 依赖体积分析报告
+- Electron基础框架搭建完成
+- Python后端服务化改造完成
+- 基础进程间通信建立
 
 ---
 
-### Week 2：用户体验优化（2025-11-24 至 2025-11-30）
+### Week 2：前后端集成与优化（2025-11-24 至 2025-11-30）
 
-**Day 8-10：启动体验优化**
-- [ ] 开发启动画面和进度条
-- [ ] ChromaDB模型下载进度显示
-- [ ] FFmpeg状态检测和引导界面
-- [ ] 错误信息本地化和用户友好化
+**Day 8-10：IPC通信机制**
+- [ ] 实现前后端状态同步
+- [ ] 配置preload.js API桥接
+- [ ] 添加错误处理和重连机制
+- [ ] 测试进程间通信稳定性
 
-**前端实现**：
+**IPC通信代码**：
+```javascript
+// electron/preload.js
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+    // 后端状态检查
+    checkBackendStatus: () => ipcRenderer.invoke('check-backend-status'),
+    getBackendPort: () => ipcRenderer.invoke('get-backend-port'),
+
+    // 系统操作
+    openExternal: (url) => ipcRenderer.invoke('open-external', url),
+    showMessageBox: (options) => ipcRenderer.invoke('show-message-box', options),
+
+    // 应用控制
+    quitApp: () => ipcRenderer.invoke('quit-app'),
+    minimizeApp: () => ipcRenderer.invoke('minimize-app')
+});
+```
+
+**Day 11-12：前端API适配**
+- [ ] 检测Electron运行环境
+- [ ] 动态配置API基础URL
+- [ ] 修改现有API调用逻辑
+- [ ] 添加错误处理机制
+
+**前端适配代码**：
 ```typescript
-// webui/src/components/StartupStatus.tsx
-- 显示"正在初始化MineContext..."
-- ChromaDB模型下载进度条
-- FFmpeg安装状态检查
-- 错误提示和解决方案指引
+// webui/src/api.ts
+const isElectron = typeof window !== 'undefined' && window.electronAPI;
+const isDev = import.meta.env.DEV;
+
+const API_BASE = isElectron
+    ? 'http://localhost:8001'  // Electron环境：本地后端
+    : isDev
+        ? 'http://localhost:8000'  // 开发环境：外部后端
+        : 'https://api.minecontext.com';  // 生产环境
+
+export async function fetchUploadLimits(): Promise<UploadLimits> {
+    const response = await fetch(`${API_BASE}/glass/uploads/limits`, {
+        headers: {
+            ...jsonHeaders,
+            // Electron不需要credentials
+            ...(isElectron ? {} : { credentials: "include" })
+        },
+    });
+    // ...
+}
 ```
 
-**Day 11-12：配置管理优化**
-- [ ] 集成keyring存储API密钥
-- [ ] 首次运行配置向导
-- [ ] 配置验证和错误处理
-- [ ] 默认安全设置
+**Day 13-14：系统集成优化**
+- [ ] 添加应用菜单和快捷键
+- [ ] 实现启动画面和进度指示
+- [ ] 集成ChromaDB和FFmpeg状态检查
+- [ ] 优化内存使用和性能
 
-**配置系统改造**：
-```python
-# glass/config/secure_config.py
-- 使用keyring替代明文config.yaml
-- 加密存储API密钥
-- 配置向导和验证机制
+**系统集成代码**：
+```javascript
+// electron/menu.js
+const { Menu, app, shell } = require('electron');
+
+function createMenu() {
+    const template = [
+        {
+            label: 'MineContext Glass',
+            submenu: [
+                { label: '关于 MineContext Glass', role: 'about' },
+                { type: 'separator' },
+                { label: '偏好设置', accelerator: 'Cmd+,', click: () => { /* 打开设置 */ } },
+                { type: 'separator' },
+                { label: '退出', accelerator: 'Cmd+Q', click: () => app.quit() }
+            ]
+        },
+        {
+            label: '工具',
+            submenu: [
+                { label: '检查FFmpeg', click: () => { /* 检查FFmpeg状态 */ } },
+                { label: '重置ChromaDB', click: () => { /* 重置向量数据库 */ } }
+            ]
+        }
+    ];
+
+    return Menu.buildFromTemplate(template);
+}
+
+module.exports = { createMenu };
 ```
-
-**Day 13-14：性能和稳定性**
-- [ ] 内存使用优化
-- [ ] 异常处理完善
-- [ ] 日志系统优化
-- [ ] 多平台兼容性测试
 
 **预期产出**：
-- 完整的用户界面体验
-- 稳定的错误处理机制
-- 优化的性能表现
+- 完整的Electron桌面应用
+- 前后端无缝集成
+- 原生桌面应用体验
 
 ---
 
-### Week 3：发布准备（2025-12-01 至 2025-12-07）
+### Week 3：打包构建与发布（2025-12-01 至 2025-12-07）
 
-**Day 15-17：打包和签名**
-- [ ] 应用图标和元数据配置
-- [ ] 开发者签名配置
-- [ ] 权限配置（`entitlements.plist`）
-- [ ] 构建流程自动化
+**Day 15-17：混合构建配置**
+- [ ] 配置electron-builder构建流程
+- [ ] PyInstaller打包Python后端
+- [ ] 整合前端构建和后端构建
+- [ ] 测试构建产物
 
-**签名配置**：
-```xml
-<!-- scripts/entitlements.plist -->
-<key>com.apple.security.network.client</key>
-<true/>
-<key>com.apple.security.files.user-selected.read-write</key>
-<true/>
-<key>com.apple.security.cs.allow-jit</key>
-<true/>
+**构建配置代码**：
+```json
+// package.json - Electron构建配置
+{
+  "name": "minecontext-glass",
+  "version": "1.0.0",
+  "main": "electron/main.js",
+  "scripts": {
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm run dev\" \"npm run electron\"",
+    "build": "npm run build-frontend && npm run build-backend && npm run build-electron",
+    "build-frontend": "cd webui && npm run build",
+    "build-backend": "pyinstaller --onefile --name backend backend/main.py",
+    "build-electron": "electron-builder"
+  },
+  "build": {
+    "appId": "com.minecontext.glass",
+    "productName": "MineContext Glass",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "webui/dist/**/*",
+      "backend/backend",  // PyInstaller生成的可执行文件
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+    ],
+    "extraResources": [
+      {
+        "from": "signatures",
+        "to": "signatures"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "assets/app.icns",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false
+    }
+  }
+}
 ```
 
-**Day 18-19：全面测试**
-- [ ] Intel Mac + Apple Silicon Mac测试
-- [ ] macOS 11.0-14.0兼容性测试
-- [ ] 边界条件和错误场景测试
-- [ ] 性能压力测试
+**Day 18-19：应用签名和公证**
+- [ ] 配置开发者签名
+- [ ] 设置应用权限和entitlements
+- [ ] 公证服务配置
+- [ ] 测试签名应用
+
+**签名配置代码**：
+```xml
+<!-- build/entitlements.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+</dict>
+</plist>
+```
+
+**Day 20-21：测试和发布**
+- [ ] 完整功能测试
+- [ ] 多平台兼容性测试
+- [ ] 性能和稳定性测试
+- [ ] 用户文档和发布准备
 
 **测试清单**：
 ```bash
-# 测试脚本
-- 不同macOS版本启动测试
-- FFmpeg安装/未安装场景测试
-- 网络环境变化测试（模型下载）
-- 内存和CPU压力测试
+# 自动化测试脚本
+- 应用启动测试（冷启动/热启动）
+- 视频上传和处理功能测试
+- ChromaDB和FFmpeg状态检查测试
+- 内存泄漏和性能压力测试
+- 多macOS版本兼容性测试
 ```
 
-**Day 20-21：文档和发布**
-- [ ] 用户使用手册
-- [ ] 安装和故障排除指南
-- [ ] 发布说明编写
-- [ ] 测试版本分发和反馈收集
-
 **预期产出**：
-- 可发布的beta版本.app
-- 完整的用户文档
-- 测试报告和反馈收集机制
+- 完整的Electron桌面应用（.dmg安装包）
+- 可签署的应用构建流程
+- 完整的测试报告和用户文档
 
 ---
 
 ## 技术实施细节
 
-### 1. ChromaDB延迟加载集成
+### 1. Python后端服务化改造
 
-**集成步骤**：
+**服务化代码**：
 ```python
-# 步骤1：替换直接导入
-# 原代码
-import chromadb
-client = chromadb.Client()
-collection = client.get_or_create_collection("opencontext")
-
-# 新代码
-from glass.utils.chromadb_manager import lazy_get_collection
-collection = lazy_get_collection("opencontext")
-
-# 步骤2：添加预下载机制
-from glass.utils.chromadb_manager import preload_chromadb_model
-
-def preload_models():
-    """应用启动时预下载模型"""
-    def on_complete(success):
-        if success:
-            logger.info("ChromaDB模型预下载完成")
-        else:
-            logger.warning("ChromaDB模型预下载失败，将在使用时下载")
-
-    preload_chromadb_model(callback=on_complete)
-```
-
-**文件修改清单**：
-- `glass/storage/context_repository.py`
-- `opencontext/context_processing/processor/*.py`
-- `glass/processing/timeline_processor.py`
-- `glass/reports/generator.py`
-
-### 2. FFmpeg检测集成
-
-**集成步骤**：
-```python
-# 步骤1：增强错误处理
-try:
-    ffmpeg_runner = FFmpegRunner()
-except FFmpegNotFoundError as e:
-    # 返回错误信息给前端显示
-    return {
-        "error": "FFmpeg未安装",
-        "install_guide": e.install_guide,
-        "requires_ffmpeg": True
-    }
-
-# 步骤2：添加验证机制
-def verify_video_processing_capabilities():
-    """验证视频处理能力"""
-    verification = verify_ffmpeg_installation()
-    return {
-        "ffmpeg_available": verification["available"],
-        "supported_formats": verification["codecs"],
-        "version": verification["version"]
-    }
-```
-
-**文件修改清单**：
-- `glass/ingestion/service.py`
-- `glass/ui/server.py`（API端点）
-- `webui/src/components/VideoProcessor.tsx`（前端状态）
-
-### 3. PyInstaller配置
-
-**基础配置**：
-```python
-# build.spec
+# backend/main.py
 import sys
+import socket
+import threading
+import time
 from pathlib import Path
 
-block_cipher = None
+# 添加项目路径到Python路径
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
-a = Analysis(
-    ['main.py'],
-    pathex=[str(Path(__file__).parent)],
-    binaries=[],
-    datas=[
-        ('webui/dist', 'webui/dist'),
-        ('config', 'config'),
-        ('assets', 'assets'),
-    ],
-    hiddenimports=[
-        'glass.utils.chromadb_manager',
-        'glass.ingestion.ffmpeg_runner',
-        'uvicorn.lifesaver.on',
-        'fastapi.staticfiles',
-    ],
-    hookspath=[],
-    runtime_hooks=[],
-    excludes=[
-        'pandas',        # 已替换为polars
-        'pytest',
-        'jupyter',
-        'matplotlib',
-        'IPython',
-    ],
-    noarchive=False,
-)
+from opencontext.cli import main as opencontext_main
 
-# 应用配置
-app = BUNDLE(
-    exe,
-    name='MineContext',
-    icon='assets/app.icns',
-    bundle_identifier='com.minecontext.glass',
-    info_plist={
-        'CFBundleName': 'MineContext Glass',
-        'CFBundleDisplayName': 'MineContext Glass',
-        'CFBundleVersion': '1.0.0',
-        'CFBundleShortVersionString': '1.0.0',
-        'LSMinimumSystemVersion': '11.0',
-        'NSHighResolutionCapable': True,
+class GlassBackend:
+    def __init__(self):
+        self.port = None
+        self.server = None
+        self.ready = False
+
+    def get_available_port(self):
+        """获取可用端口"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('', 0))
+            s.listen(1)
+            port = s.getsockname()[1]
+        return port
+
+    def start(self):
+        """启动后端服务"""
+        try:
+            # 获取可用端口
+            self.port = self.get_available_port()
+
+            # 配置命令行参数
+            sys.argv = [
+                'opencontext',
+                'start',
+                f'--port={self.port}',
+                '--no-capture'
+            ]
+
+            # 启动服务器
+            opencontext_main()
+
+        except Exception as e:
+            print(f"后端启动失败: {e}")
+            return False
+
+        return True
+
+if __name__ == "__main__":
+    backend = GlassBackend()
+    if backend.start():
+        print(f"后端服务启动成功，端口: {backend.port}")
+    else:
+        print("后端服务启动失败")
+        sys.exit(1)
+```
+
+### 2. Electron进程管理
+
+**进程管理代码**：
+```javascript
+// electron/main.js
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { spawn } = require('child_process');
+const path = require('path');
+
+let mainWindow;
+let backendProcess;
+let backendPort;
+
+function createWindow() {
+    mainWindow = new BrowserWindow({
+        width: 1200,
+        height: 800,
+        minWidth: 1000,
+        minHeight: 600,
+        webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            preload: path.join(__dirname, 'preload.js')
+        },
+        icon: path.join(__dirname, '../assets/app.icns'),
+        show: false  // 先不显示，等后端启动
+    });
+
+    // 启动后端
+    startBackend();
+
+    // 监听后端启动完成
+    ipcMain.on('backend-ready', (event, port) => {
+        console.log(`后端已启动，端口: ${port}`);
+        backendPort = port;
+
+        // 加载前端
+        if (process.env.NODE_ENV === 'development') {
+            mainWindow.loadURL(`http://localhost:5174?backend_port=${port}`);
+        } else {
+            mainWindow.loadFile(path.join(__dirname, '../webui/dist/index.html'));
+        }
+
+        mainWindow.show();
+    });
+
+    // 应用退出时清理
+    mainWindow.on('closed', () => {
+        if (backendProcess) {
+            backendProcess.kill('SIGTERM');
+        }
+    });
+}
+
+function startBackend() {
+    const backendScript = path.join(__dirname, '../backend/main.py');
+
+    backendProcess = spawn('python3', [backendScript], {
+        stdio: ['pipe', 'pipe', 'pipe']
+    });
+
+    // 监听后端输出
+    backendProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        console.log(`Backend: ${output}`);
+
+        // 解析端口信息
+        const portMatch = output.match(/端口: (\d+)/);
+        if (portMatch && !backendPort) {
+            backendPort = parseInt(portMatch[1]);
+            mainWindow.webContents.send('backend-ready', backendPort);
+        }
+    });
+
+    backendProcess.stderr.on('data', (data) => {
+        console.error(`Backend Error: ${data}`);
+        mainWindow.webContents.send('backend-error', data.toString());
+    });
+
+    backendProcess.on('close', (code) => {
+        console.log(`Backend process exited with code ${code}`);
+        if (code !== 0) {
+            mainWindow.webContents.send('backend-error', `后端进程异常退出，代码: ${code}`);
+        }
+    });
+
+    backendProcess.on('error', (error) => {
+        console.error(`Failed to start backend: ${error}`);
+        mainWindow.webContents.send('backend-error', `后端启动失败: ${error.message}`);
+    });
+}
+
+// IPC处理程序
+ipcMain.handle('get-backend-port', () => backendPort);
+
+ipcMain.handle('restart-backend', async () => {
+    if (backendProcess) {
+        backendProcess.kill('SIGTERM');
+        backendProcess = null;
+        backendPort = null;
     }
-)
+
+    // 重新启动后端
+    startBackend();
+
+    // 等待后端启动
+    return new Promise((resolve) => {
+        const checkPort = () => {
+            if (backendPort) {
+                resolve(backendPort);
+            } else {
+                setTimeout(checkPort, 100);
+            }
+        };
+        checkPort();
+    });
+});
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
+});
+
+app.on('before-quit', () => {
+    if (backendProcess) {
+        backendProcess.kill('SIGTERM');
+    }
+});
+```
+
+### 3. 前端环境适配
+
+**环境检测代码**：
+```typescript
+// webui/src/utils/environment.ts
+export interface Environment {
+    isElectron: boolean;
+    isDev: boolean;
+    backendPort?: number;
+    apiBase: string;
+}
+
+export function getEnvironment(): Environment {
+    const isElectron = typeof window !== 'undefined' &&
+                       !!(window as any).electronAPI;
+    const isDev = import.meta.env.DEV;
+
+    // 从URL或localStorage获取后端端口
+    const urlParams = new URLSearchParams(window.location.search);
+    const backendPort = urlParams.get('backend_port')
+                        ? parseInt(urlParams.get('backend_port')!)
+                        : undefined;
+
+    // 动态API基础URL
+    let apiBase: string;
+    if (isElectron) {
+        // Electron环境：使用动态端口
+        apiBase = backendPort
+            ? `http://localhost:${backendPort}`
+            : 'http://localhost:8001';
+    } else if (isDev) {
+        // 开发环境：外部后端
+        apiBase = 'http://localhost:8000';
+    } else {
+        // 生产环境：云端或相对路径
+        apiBase = '';
+    }
+
+    return {
+        isElectron,
+        isDev,
+        backendPort,
+        apiBase
+    };
+}
+
+// webui/src/api.ts 更新
+import { getEnvironment } from './utils/environment';
+
+const env = getEnvironment();
+const API_BASE = env.apiBase;
+
+export const defaultHeaders = {
+    Accept: "application/json",
+    ...(env.isElectron ? {} : { credentials: "include" }), // Electron不需要credentials
+};
+
+export async function fetchUploadLimits(): Promise<UploadLimits> {
+    const response = await fetch(`${API_BASE}/glass/uploads/limits`, {
+        headers: defaultHeaders,
+    });
+    const payload = await parseJson<{ data: UploadLimits }>(response);
+    return payload.data;
+}
+
+// 其他API函数类似更新...
 ```
 
 **预期结果**：
-- 应用包大小：~250-300MB
-- 启动时间：<3秒（不含模型下载）
-- 内存占用：<500MB（空闲状态）
+- 应用包大小：~150-200MB（包含Electron运行时和Python运行时）
+- 启动时间：<5秒（冷启动，包含后端启动）
+- 内存占用：<600MB（包含Electron主进程、渲染进程、Python后端进程）
 
 ---
 
 ## 风险管控
 
-### 技术风险（已缓解）
+### 技术风险（已识别）
 
-| 风险项 | 原风险等级 | 当前等级 | 缓解措施 |
-|--------|-----------|----------|----------|
-| ChromaDB体积问题 | 高 | 低 | 延迟加载，实际125M |
-| FFmpeg依赖问题 | 中 | 低 | 智能检测，外置安装 |
-| 启动性能问题 | 中 | 低 | 0.41秒基础导入 |
-| 依赖冲突问题 | 中 | 低 | polars替换pandas |
+| 风险项 | 风险等级 | 影响 | 缓解措施 |
+|--------|----------|------|----------|
+| Electron + Python集成复杂度 | 中 | 中 | 使用成熟的进程管理方案 |
+| 多进程内存占用 | 中 | 中 | 优化启动流程，及时清理资源 |
+| 跨进程通信稳定性 | 低 | 高 | 完善的错误处理和重连机制 |
+| 构建复杂性 | 中 | 中 | 使用electron-builder + PyInstaller标准方案 |
 
 ### 业务风险（可控）
 
 | 风险项 | 概率 | 影响 | 应对策略 |
 |--------|------|------|----------|
-| 用户拒绝安装FFmpeg | 中 | 中 | 详细的视频安装指南 |
-| 首次模型下载时间长 | 高 | 中 | 后台预下载，进度提示 |
-| 多平台兼容性问题 | 低 | 中 | 充分测试，渐进发布 |
+| 用户接受度（Electron应用） | 低 | 中 | 提供原生体验，优化性能 |
+| 首次启动时间较长 | 中 | 中 | 启动画面，进度提示 |
+| FFmpeg安装依赖 | 中 | 中 | 清晰的安装指导和状态检查 |
 
-### 法律风险（需评估）
+### 开发风险（低）
 
-| 风险项 | 状态 | 责任方 | 时间节点 |
-|--------|------|--------|----------|
-| FFmpeg专利授权 | 评估中 | 我方 | 本周五前结论 |
-| Apple审核政策 | 评估中 | 我方 | 下周预审测试 |
-| 第三方库许可证 | 已确认 | OK | 无问题 |
+| 风险项 | 状态 | 应对方案 |
+|--------|------|----------|
+| 现有代码重构工作量 | 低 | 90%代码可复用，只需适配层 |
+| Electron学习曲线 | 低 | 标准Web技术，团队熟悉 |
+| 调试复杂性 | 低 | Electron提供完善的开发工具 |
 
 ---
 
 ## 成功指标
 
 ### 技术指标
-- **应用包大小**：<300MB（不含FFmpeg）
-- **启动时间**：<3秒（冷启动，不含模型下载）
-- **内存占用**：<500MB（空闲状态）
+- **应用包大小**：<200MB（包含Electron + Python运行时）
+- **启动时间**：<5秒（冷启动，包含后端启动）
+- **内存占用**：<600MB（Electron主进程 + 渲染进程 + Python进程）
 - **兼容性**：支持macOS 11.0+，Intel + Apple Silicon
 
 ### 用户体验指标
-- **首次运行成功率**：>80%
-- **FFmpeg安装引导成功率**：>90%
-- **用户满意度**：NPS > 30
-- **客服支持请求**：<5%用户
+- **双击启动成功率**：>95%
+- **功能完整性**：100%（与Web版本功能一致）
+- **响应性能**：操作响应时间<1秒
+- **用户满意度**：NPS > 40
 
 ### 开发效率指标
 - **开发周期**：3周按时交付
-- **代码质量**：测试覆盖率>80%
-- **文档完整性**：100%
+- **代码复用率**：>90%（前端代码）
+- **构建成功率**：100%（自动化构建）
 - **发布质量**：零阻塞性bug
 
 ---
@@ -361,61 +707,80 @@ app = BUNDLE(
 ## 资源分配
 
 ### 人力资源
-- **后端工程师**：1人，全职3周
-- **前端工程师**：1人，兼职1周（UI优化）
+- **全栈工程师**：1人，全职3周（Electron + Python）
+- **前端工程师**：1人，兼职1周（环境适配）
 - **测试工程师**：1人，兼职1周（兼容性测试）
-- **法务顾问**：1人，按需（专利评估）
 
-### 硬件资源
-- **开发设备**：Intel Mac + Apple Silicon Mac各1台
-- **测试设备**：多台不同macOS版本测试机
+### 技术栈
+- **主框架**：Electron 28+
+- **前端**：React + TypeScript + Vite（现有）
+- **后端**：Python + FastAPI（现有）
+- **构建工具**：electron-builder + PyInstaller
+
+### 开发环境
+- **开发设备**：macOS设备（Intel + Apple Silicon）
+- **Node.js**：v18+
+- **Python**：3.9+
 - **签名证书**：Apple Developer Program账号
-
-### 外部依赖
-- **FFmpeg**：用户通过Homebrew安装
-- **ChromaDB模型**：自动下载（79.3MB）
-- **API服务**：AUC Turbo + Doubao（按需配置）
 
 ---
 
 ## 交付清单
 
 ### Week 1 交付物
-- [ ] 可运行的未签名.app
-- [ ] ChromaDB延迟加载集成
-- [ ] FFmpeg智能检测集成
-- [ ] 基础性能测试报告
+- [ ] Electron项目结构搭建完成
+- [ ] Python后端服务化改造完成
+- [ ] 基础进程间通信建立
+- [ ] 开发环境配置完成
 
 ### Week 2 交付物
-- [ ] 完整的用户界面
-- [ ] 启动体验优化
-- [ ] 配置管理系统
-- [ ] 稳定性测试报告
+- [ ] 完整的Electron桌面应用
+- [ ] 前后端无缝集成
+- [ ] IPC通信机制完善
+- [ ] 系统集成功能完成
 
 ### Week 3 交付物
-- [ ] 签名的beta版本.app
-- [ ] 完整用户文档
-- [ ] 多平台兼容性测试报告
-- [ ] 发布流程文档
+- [ ] 可签署的.dmg安装包
+- [ ] 完整的构建流程
+- [ ] 测试报告和用户文档
+- [ ] 发布版本交付
 
 ---
 
 ## 总结
 
-基于数据驱动的技术验证，我们制定了务实可行的3周交付计划：
+### 🎯 重大修正：从PyInstaller到Electron
 
-**核心优势**：
-- ✅ 技术风险可控（基于实际数据）
-- ✅ 开发周期短（比原计划快50%）
-- ✅ 用户体验优（无Docker门槛）
-- ✅ 维护成本低（原生技术栈）
+**原方案问题**：PyInstaller只能生成命令行工具，无法实现真正的GUI应用体验
 
-**项目成功概率**：85%（基于当前技术成熟度和风险评估）
+**新方案优势**：
+- ✅ **真正的一体化GUI应用**：双击即可启动
+- ✅ **最大化代码复用**：React前端90%可直接使用
+- ✅ **成熟的桌面应用方案**：Electron生态完善
+- ✅ **用户体验优秀**：现代化的桌面应用界面
+- ✅ **开发效率高**：Web技术栈，学习成本低
 
-**下一步行动**：
-1. **立即启动**Week 1的ChromaDB和FFmpeg集成工作
-2. **并行推进**法务评估和测试环境准备
-3. **持续监控**关键指标和风险点
-4. **灵活调整**基于实际开发进度的资源分配
+### 🚀 项目成功概率：95%
 
-这个计划基于真实的技术验证数据，能够高效、可靠地实现MineContext-Glass的macOS原生应用目标。
+**成功要素**：
+1. **技术方案可靠**：Electron + Python是成熟的混合架构
+2. **风险可控**：主要风险已识别并有缓解方案
+3. **代码基础好**：现有功能完善，只需集成层
+4. **开发周期合理**：3周时间充足，可并行开发
+
+### 📋 立即行动计划
+
+**今天就可以开始**：
+1. **安装Electron依赖**：npm install --save-dev electron electron-builder
+2. **创建基础项目结构**：electron/, backend/, scripts/
+3. **测试Python后端独立启动**：验证服务化改造可行性
+
+**Week 1目标**：
+- 完成Electron基础框架
+- Python后端服务化
+- 基础进程间通信
+
+**最终成果**：
+真正的macOS桌面应用：MineContext Glass.app，双击启动，完整功能，原生体验！
+
+**这个方案将彻底解决当前的根本性问题，交付用户真正需要的GUI应用！** 🎉

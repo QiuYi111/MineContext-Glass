@@ -16,7 +16,6 @@ import datetime
 import time
 from enum import Enum
 
-import chromadb
 import signal
 import atexit
 import threading
@@ -26,6 +25,7 @@ from opencontext.models.context import ProcessedContext, Vectorize, ExtractedDat
 from opencontext.models.enums import ContextType, ContentFormat
 from opencontext.utils.logging_utils import get_logger
 from opencontext.llm.global_embedding_client import do_vectorize
+from glass.utils.chromadb_manager import get_chromadb_manager
 
 logger = get_logger(__name__)
 
@@ -38,8 +38,8 @@ class ChromaDBBackend(IVectorStorageBackend):
     """
     
     def __init__(self):
-        self._client: Optional[chromadb.Client] = None
-        self._collections: Dict[str, chromadb.Collection] = {}  # context_type -> collection
+        self._client = None  # 延迟加载的客户端
+        self._collections: Dict[str, Any] = {}  # context_type -> collection
         self._initialized = False
         self._config = None
         self._is_server_mode = False
@@ -49,7 +49,8 @@ class ChromaDBBackend(IVectorStorageBackend):
         self._pending_writes = []  # Pending writes
         self._write_lock = threading.Lock()  # Write lock
         self._cleanup_registered = False
-        
+        self._chromadb_manager = get_chromadb_manager()
+
         # Register graceful shutdown handler
         self._register_cleanup_handlers()
     
@@ -113,48 +114,19 @@ class ChromaDBBackend(IVectorStorageBackend):
             logger.error(f"Failed to flush pending writes: {e}")
         
     def initialize(self, config: Dict[str, Any]) -> bool:
-        """Initialize the ChromaDB backend, supporting local persistence and server mode"""
+        """Initialize the ChromaDB backend using the延迟加载管理器"""
         try:
             self._config = config
-            chroma_config = config.get('config', {})
-            
-            # Check mode configuration
-            mode = chroma_config.get('mode', 'local')
-            
-            if mode == 'server':
-                # Server mode
-                self._is_server_mode = True
-                host = chroma_config.get('host', 'localhost')
-                port = chroma_config.get('port', 8000)
-                ssl = chroma_config.get('ssl', False)
-                headers = chroma_config.get('headers', {})
-                settings = chroma_config.get('settings', {})
-                
-                # Build server URL
-                protocol = "https" if ssl else "http"
-                server_url = f"{protocol}://{host}:{port}"
-                
-                logger.info(f"Initializing ChromaDB in server mode: {server_url}")
-                
-                # Create HTTP client and test connection
-                self._client = self._create_server_client(host, port, ssl, headers, settings)
-                
-            else:
-                # Local persistence mode
-                self._is_server_mode = False
-                path = chroma_config.get("path", "./persist/chromadb")
-                logger.info(f"Initializing ChromaDB in local persistence mode: {path}")
-                
-                if path:
-                    self._client = chromadb.PersistentClient(path=path)
-                else:
-                    self._client = chromadb.Client()
-            
-            # Get all available context_types
+
+            # 使用延迟加载管理器获取客户端
+            # 这将自动处理 ONNX 模型下载
+            logger.info("正在初始化ChromaDB客户端...")
+            self._client = self._chromadb_manager.get_client()
+
+            # 获取所有可用的 context_types
             context_types = [ct.value for ct in ContextType]
-            config.get("collection_prefix", "opencontext")
-            
-            # Create a separate collection for each context_type
+
+            # 为每个 context_type 创建独立的集合
             for context_type in context_types:
                 collection_name = f"{context_type}"
                 collection = self._client.get_or_create_collection(
@@ -162,98 +134,29 @@ class ChromaDBBackend(IVectorStorageBackend):
                     metadata={"hnsw:space": "cosine", "context_type": context_type}
                 )
                 self._collections[context_type] = collection
-            
+
             self._initialized = True
-            logger.info(f"ChromaDB vector backend initialized successfully, created {len(self._collections)} collections")
+            logger.info(f"ChromaDB向量后端初始化成功，创建了{len(self._collections)}个集合")
             return True
-            
+
         except Exception as e:
-            logger.exception(f"ChromaDB vector backend initialization failed: {e}")
+            logger.exception(f"ChromaDB向量后端初始化失败: {e}")
             return False
-    
-    def _create_server_client(self, host: str, port: int, ssl: bool, headers: Dict, settings: Dict) -> chromadb.HttpClient:
-        """Create a server client and test the connection"""
-        for attempt in range(self._max_retry_count):
-            try:
-                client = chromadb.HttpClient(
-                    host=host,
-                    port=port,
-                    ssl=ssl,
-                    headers=headers,
-                    settings=chromadb.Settings(**settings) if settings else None
-                )
-                
-                # Test connection
-                client.heartbeat()
-                logger.info("ChromaDB server connection successful")
-                self._connection_retry_count = 0
-                return client
-                
-            except Exception as e:
-                self._connection_retry_count += 1
-                protocol = "https" if ssl else "http"
-                server_url = f"{protocol}://{host}:{port}"
-                
-                if attempt < self._max_retry_count - 1:
-                    logger.warning(f"ChromaDB server connection failed (attempt {attempt + 1}/{self._max_retry_count}): {e}, retrying in {self._retry_delay} seconds")
-                    time.sleep(self._retry_delay)
-                    self._retry_delay *= 2  # Exponential backoff
-                else:
-                    logger.error(f"Could not connect to ChromaDB server {server_url} (all retries failed): {e}")
-                    raise RuntimeError(f"ChromaDB server connection failed: {e}")
     
     def _check_connection(self) -> bool:
-        """Check connection health"""
-        if not self._client:
-            return False
-            
-        if self._is_server_mode:
-            try:
-                self._client.heartbeat()
-                return True
-            except Exception as e:
-                logger.warning(f"ChromaDB server health check failed: {e}")
-                return False
-        else:
-            # Local mode, assume connection is always available
-            return True
-    
+        """Check connection health - simplified with延迟加载"""
+        return self._client is not None
+
     def _ensure_connection(self) -> bool:
-        """Ensure connection is available, reconnect if necessary"""
-        if self._check_connection():
-            return True
-            
-        if self._is_server_mode and self._config:
-            logger.info("Attempting to reconnect to ChromaDB server...")
+        """Ensure connection is available - simplified with延迟加载"""
+        if not self._client:
             try:
-                chroma_config = self._config.get('config', {})
-                host = chroma_config.get('host', 'localhost')
-                port = chroma_config.get('port', 8000)
-                ssl = chroma_config.get('ssl', False)
-                headers = chroma_config.get('headers', {})
-                settings = chroma_config.get('settings', {})
-                
-                self._client = self._create_server_client(host, port, ssl, headers, settings)
-                
-                # Re-initialize collections
-                self._collections.clear()
-                context_types = [ct.value for ct in ContextType]
-                for context_type in context_types:
-                    collection_name = f"{context_type}"
-                    collection = self._client.get_or_create_collection(
-                        name=collection_name,
-                        metadata={"hnsw:space": "cosine", "context_type": context_type}
-                    )
-                    self._collections[context_type] = collection
-                    
-                logger.info("ChromaDB server reconnected successfully")
+                self._client = self._chromadb_manager.get_client()
                 return True
-                
             except Exception as e:
-                logger.error(f"ChromaDB server reconnection failed: {e}")
+                logger.error(f"无法获取ChromaDB客户端: {e}")
                 return False
-        
-        return False
+        return True
     
     def get_name(self) -> str:
         return "chromadb"

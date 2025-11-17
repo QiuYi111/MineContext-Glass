@@ -13,6 +13,7 @@ import HighlightCarousel from "./components/HighlightCarousel";
 import VisualMosaic from "./components/VisualMosaic";
 import StatusToast from "./components/StatusToast";
 import GenerateAction from "./components/GenerateAction";
+import SystemStatus from "./components/SystemStatus";
 
 import "./styles/app.css";
 
@@ -286,6 +287,9 @@ const App = (): JSX.Element => {
     <main className="glass-shell">
       <Header />
       <UploadPanel limits={limits} disabled={false} onFilesPicked={handleFilesPicked} />
+      <div className="system-status-container">
+        <SystemStatus />
+      </div>
       <GenerateAction
         timelineName={selectedEntry?.filename ?? null}
         status={selectedEntry?.status ?? null}

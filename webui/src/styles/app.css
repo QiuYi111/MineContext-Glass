@@ -44,3 +44,9 @@
     padding: 48px 22px 72px;
   }
 }
+
+.system-status-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}

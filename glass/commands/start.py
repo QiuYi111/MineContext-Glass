@@ -14,6 +14,7 @@ from glass.ingestion import (
     SpeechToTextRunner,
     build_speech_to_text_runner_from_config,
 )
+from glass.ingestion.ffmpeg_runner import FFmpegNotFoundError, verify_ffmpeg_installation
 from glass.processing.chunkers import ManifestChunker
 from glass.processing.timeline_processor import GlassTimelineProcessor
 from glass.processing.visual_encoder import VisualEncoder
@@ -91,7 +92,24 @@ class GlassBatchRunner:
 
         self._repository = repository or GlassContextRepository()
         self._speech_runner = speech_runner or build_speech_to_text_runner_from_config()
-        self._ffmpeg_runner = ffmpeg_runner or FFmpegRunner()
+
+        # FFmpeg检测和错误处理
+        if ffmpeg_runner is None:
+            try:
+                self._ffmpeg_runner = FFmpegRunner()
+                logger.info("✅ FFmpeg检测成功")
+            except FFmpegNotFoundError as e:
+                logger.error(f"❌ FFmpeg检测失败: {e}")
+                # 提供安装指导
+                if hasattr(e, 'install_guide') and e.install_guide:
+                    logger.info(f"FFmpeg安装指导:\n{e.install_guide}")
+                raise RuntimeError(
+                    "FFmpeg未安装或无法找到。请安装FFmpeg后重试。\n"
+                    f"安装指导: {e.install_guide if hasattr(e, 'install_guide') and e.install_guide else 'https://ffmpeg.org/download.html'}"
+                ) from e
+        else:
+            self._ffmpeg_runner = ffmpeg_runner
+
         self._video_manager = LocalVideoManager(
             ffmpeg_runner=self._ffmpeg_runner,
             speech_runner=self._speech_runner,
