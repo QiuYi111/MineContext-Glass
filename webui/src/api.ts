@@ -1,14 +1,40 @@
 import type { DailyReport, UploadLimits, UploadResponse, UploadStatus } from "./types";
 
-const API_BASE = (import.meta.env.VITE_GLASS_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "";
+// 从URL参数获取后端端口，用于Electron环境
+function getBackendBase(): string {
+  if (typeof window !== "undefined") {
+    const urlParams = new URLSearchParams(window.location.search);
+    const backendPort = urlParams.get("backend_port");
+    if (backendPort) {
+      // Electron环境：直接使用后端端口，绕过Vite代理
+      console.log(`Electron环境检测到，使用后端端口: ${backendPort}`);
+      return `http://127.0.0.1:${backendPort}`;
+    }
+  }
+  // 开发环境：使用Vite代理
+  return "";
+}
+
+// 检测是否在Electron环境中
+function isElectronEnvironment(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.search.includes("backend_port");
+}
+
+function buildUrl(path: string): string {
+  if (isElectronEnvironment()) {
+    // Electron环境：直接请求后端
+    const backendBase = getBackendBase();
+    return `${backendBase}${path}`;
+  } else {
+    // 开发环境：通过Vite代理
+    return path;
+  }
+}
 
 const jsonHeaders = {
   Accept: "application/json",
 };
-
-function buildUrl(path: string): string {
-  return `${API_BASE}${path}`;
-}
 
 async function parseJson<T>(response: Response): Promise<T> {
   if (!response.ok) {

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { fetchSystemStatus, SystemStatus } from "../api";
+import { fetchSystemStatus, SystemStatus as SystemStatusType } from "../api";
 
 import "./SystemStatus.css";
 
 const SystemStatus = (): JSX.Element => {
-  const [status, setStatus] = useState<SystemStatus | null>(null);
+  const [status, setStatus] = useState<SystemStatusType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
