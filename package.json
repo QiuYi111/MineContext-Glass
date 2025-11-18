@@ -6,9 +6,9 @@
   "scripts": {
     "electron": "electron .",
     "electron-dev": "concurrently \"npm run dev\" \"npm run electron\"",
-    "dev": "cd webui && npm run dev",
+    "dev": "cd frontend && npm run dev",
     "build": "npm run build-frontend && npm run build-backend && npm run build-electron",
-    "build-frontend": "cd webui && npm run build",
+    "build-frontend": "cd frontend && npm run build",
     "build-backend": "pyinstaller --onefile --name backend backend/main.py",
     "build-electron": "electron-builder",
     "start": "npm run electron-dev",
@@ -25,9 +25,9 @@
   "author": "MineContext Team",
   "license": "Apache-2.0",
   "devDependencies": {
-    "electron": "^28.1.0",
-    "electron-builder": "^24.6.4",
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "electron": "^39.2.1",
+    "electron-builder": "^24.6.4"
   },
   "build": {
     "appId": "com.minecontext.glass",
