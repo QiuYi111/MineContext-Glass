@@ -1,0 +1,320 @@
+{
+  "project": {
+    "name": "MineContext Glass",
+    "description": "A glasses-first personal context platform that transforms daily life video streams from smart glasses into an organized, searchable knowledge base",
+    "version": "0.1.0",
+    "generated": "2025-01-18",
+    "license": "Apache-2.0",
+    "languages": ["Python", "TypeScript", "JavaScript"],
+    "frameworks": ["FastAPI", "React", "Electron"]
+  },
+  "architecture": {
+    "type": "hybrid",
+    "components": {
+      "backend": {
+        "language": "Python",
+        "framework": "FastAPI",
+        "entry": "opencontext/cli.py"
+      },
+      "frontend": {
+        "language": "TypeScript",
+        "framework": "React",
+        "entry": "webui/src/main.tsx"
+      },
+      "desktop": {
+        "language": "JavaScript",
+        "framework": "Electron",
+        "entry": "electron/main.js"
+      }
+    }
+  },
+  "entry_points": [
+    {
+      "name": "OpenContext CLI",
+      "path": "opencontext/cli.py",
+      "type": "cli",
+      "description": "Main CLI server with FastAPI backend and web server",
+      "commands": ["start", "glass report", "glass start"],
+      "default_port": 8765
+    },
+    {
+      "name": "Glass CLI",
+      "path": "glass/cli.py",
+      "type": "cli",
+      "description": "Glass-specific CLI wrapper for video processing",
+      "commands": ["glass start <dd-mm>"],
+      "wrapper_for": "opencontext/cli.py"
+    },
+    {
+      "name": "Electron Main",
+      "path": "electron/main.js",
+      "type": "desktop",
+      "description": "Electron main process for desktop application",
+      "manages": ["python_backend", "react_frontend"],
+      "features": ["auto_port_detection", "dev_prod_modes", "subprocess_management"]
+    },
+    {
+      "name": "React App",
+      "path": "webui/src/main.tsx",
+      "type": "web",
+      "description": "React frontend application entry point",
+      "dev_port": 5174,
+      "technologies": ["React 18", "TypeScript", "Zustand", "Vite"]
+    }
+  ],
+  "core_modules": [
+    {
+      "name": "OpenContext Framework",
+      "path": "opencontext/",
+      "purpose": "General-purpose 5-layer context management system",
+      "layers": [
+        {
+          "name": "context_capture",
+          "path": "opencontext/context_capture/",
+          "purpose": "Collect context from screenshots, files, and document vaults",
+          "exports": ["ScreenshotCapture", "FileMonitor", "VaultDocumentMonitor"],
+          "key_classes": ["BaseCapture", "ScreenshotCapture"]
+        },
+        {
+          "name": "context_processing",
+          "path": "opencontext/context_processing/",
+          "purpose": "Process raw context into structured, searchable data",
+          "exports": ["DocumentProcessor", "ScreenshotProcessor", "ContextMerger"],
+          "key_classes": ["BaseProcessor", "EntityProcessor", "LLMDocumentChunker"]
+        },
+        {
+          "name": "storage",
+          "path": "opencontext/storage/",
+          "purpose": "Persist processed context with vector and document storage",
+          "exports": ["StorageManager", "VectorDBBackend", "DocumentDBBackend"],
+          "backends": ["ChromaDB", "SQLite"]
+        },
+        {
+          "name": "context_consumption",
+          "path": "opencontext/context_consumption/",
+          "purpose": "Consume context through AI agents, search, and reports",
+          "exports": ["ContextAgent", "CompletionService", "ReportGenerator"],
+          "features": ["smart_completion", "activity_monitoring", "todo_generation"]
+        },
+        {
+          "name": "server",
+          "path": "opencontext/server/",
+          "purpose": "HTTP API and real-time services",
+          "exports": ["FastAPI routes", "middleware", "OpenContext server"],
+          "routes": ["/context", "/chat", "/agent", "/debug"]
+        }
+      ]
+    },
+    {
+      "name": "Glass Extension",
+      "path": "glass/",
+      "purpose": "Video-first context capture for smart glasses",
+      "modules": [
+        {
+          "name": "ingestion",
+          "path": "glass/ingestion/",
+          "purpose": "Process video files, extract audio, transcribe speech",
+          "exports": ["VideoManager", "AUCRunner", "SpeechToText"],
+          "dependencies": ["FFmpeg", "AUC Turbo API"]
+        },
+        {
+          "name": "processing",
+          "path": "glass/processing/",
+          "purpose": "Create timeline-aligned context chunks from video",
+          "exports": ["VideoChunker", "VisualEncoder", "EnvelopeProcessor"],
+          "features": ["frame_sampling", "audio_alignment", "metadata_enrichment"]
+        },
+        {
+          "name": "storage",
+          "path": "glass/storage/",
+          "purpose": "Timeline-based storage optimized for video context",
+          "exports": ["GlassContextRepository", "TimelineModels"],
+          "schema": ["Timeline", "ContextChunk", "MediaMetadata"]
+        },
+        {
+          "name": "consumption",
+          "path": "glass/consumption/",
+          "purpose": "Generate intelligent reports from video timelines",
+          "exports": ["GlassContextSource", "ReportService"],
+          "integration": "Doubao VLM"
+        },
+        {
+          "name": "reports",
+          "path": "glass/reports/",
+          "purpose": "Automated daily activity reports and insights",
+          "exports": ["DailyReportService", "SmartTipGenerator"],
+          "output": ["markdown_reports", "timeline_summaries"]
+        }
+      ]
+    },
+    {
+      "name": "Frontend",
+      "path": "webui/",
+      "purpose": "React-based web interface for video management",
+      "modules": [
+        {
+          "name": "components",
+          "path": "webui/src/components/",
+          "purpose": "UI components for video upload and management",
+          "exports": ["VideoUploader", "TimelineView", "ReportViewer"],
+          "technologies": ["React 18", "TypeScript", "Framer Motion"]
+        },
+        {
+          "name": "api",
+          "path": "webui/src/api/",
+          "purpose": "HTTP client for backend communication",
+          "exports": ["ApiClient", "UploadService", "TimelineService"],
+          "features": ["multipart_uploads", "progress_tracking", "error_handling"]
+        }
+      ]
+    }
+  ],
+  "configuration": {
+    "main_files": [
+      {
+        "name": "Main Config",
+        "path": "config/config.yaml",
+        "purpose": "Primary configuration with database paths, API keys, service ports",
+        "sections": ["logging", "storage_backends", "ai_services", "feature_flags"]
+      },
+      {
+        "name": "Python Project",
+        "path": "pyproject.toml",
+        "purpose": "Python dependencies and CLI scripts",
+        "dependencies": ["fastapi", "chromadb", "polars", "ffmpeg", "auc_turbo"],
+        "scripts": ["opencontext", "glass"]
+      },
+      {
+        "name": "Node.js Project",
+        "path": "package.json",
+        "purpose": "Electron + Node.js configuration",
+        "main": "electron/main.js",
+        "scripts": ["dev", "build", "electron-dev", "start"]
+      }
+    ]
+  },
+  "documentation": {
+    "core": [
+      {"path": "README.md", "topic": "Project overview and setup"},
+      {"path": "CLAUDE.md", "topic": "Development guidelines and code philosophy"},
+      {"path": "docs/AGENTS.md", "topic": "AI agent architecture and patterns"},
+      {"path": "docs/macOS-App-Packaging-Guide.md", "topic": "Build and packaging instructions"}
+    ],
+    "api": [
+      {"path": "docs/api_reference_zh.md", "topic": "Chinese API reference"},
+      {"path": "docs/glass_storage_api.md", "topic": "Glass storage API"},
+      {"path": "docs/glass_processing_api.md", "topic": "Glass processing API"},
+      {"path": "docs/video_manager_api.md", "topic": "Video processing API"}
+    ],
+    "guides": [
+      {"path": "docs/guides/", "topic": "Development and contribution guides"},
+      {"path": "Electron开发指南.md", "topic": "Electron development guide (Chinese)"},
+      {"path": "docs/usage/capture_control.md", "topic": "Context capture usage"}
+    ]
+  },
+  "testing": {
+    "structure": {
+      "unit_tests": "25+ test modules",
+      "integration_tests": ["WebUI", "configuration", "speech_processing"],
+      "test_directories": ["tests/glass/", "tests/integration/"],
+      "coverage_target": "80%+"
+    },
+    "key_modules": [
+      {"path": "tests/glass/ingestion/", "focus": "video processing"},
+      {"path": "tests/glass/consumption/", "focus": "report generation"},
+      {"path": "tests/integration/", "focus": "end-to-end integration"},
+      {"path": "conftest.py", "focus": "shared test fixtures"}
+    ],
+    "commands": {
+      "all": "uv run pytest",
+      "skip_slow": "uv run pytest -m \"not slow\"",
+      "specific": "uv run pytest tests/glass/ingestion/"
+    }
+  },
+  "dependencies": {
+    "python": [
+      {"name": "FastAPI", "purpose": "REST API and async processing"},
+      {"name": "ChromaDB", "purpose": "Semantic search and embeddings"},
+      {"name": "Polars", "purpose": "High-performance data analysis"},
+      {"name": "FFmpeg", "purpose": "Video/audio extraction and processing"},
+      {"name": "AUC Turbo", "purpose": "ByteDance speech-to-text API"},
+      {"name": "Doubao VLM", "purpose": "Visual understanding for reports"}
+    ],
+    "frontend": [
+      {"name": "React 18", "purpose": "UI framework"},
+      {"name": "TypeScript", "purpose": "Type safety"},
+      {"name": "Vite", "purpose": "Fast development server and build tool"},
+      {"name": "Zustand", "purpose": "Lightweight state management"},
+      {"name": "Framer Motion", "purpose": "Smooth animations"},
+      {"name": "date-fns", "purpose": "Date manipulation"}
+    ],
+    "desktop": [
+      {"name": "Electron", "purpose": "Cross-platform desktop framework"},
+      {"name": "Electron Builder", "purpose": "Application packaging"}
+    ],
+    "dev_tools": [
+      {"name": "uv", "purpose": "Fast Python package manager (required)"},
+      {"name": "PyInstaller", "purpose": "Python application packaging"},
+      {"name": "pytest", "purpose": "Testing framework"}
+    ]
+  },
+  "quick_start": {
+    "setup": [
+      {"command": "uv sync", "description": "Install Python dependencies"},
+      {"command": "export AUC_APP_KEY=your-app-key", "description": "Set speech recognition credentials"},
+      {"command": "export AUC_ACCESS_KEY=your-access-key", "description": "Set speech recognition credentials"}
+    ],
+    "development": {
+      "backend": [
+        {"command": "uv run opencontext start --port 8000 --config config/config.yaml --no-capture", "description": "Start server without capture"},
+        {"command": "uv run glass start 22-10 --config config/config.yaml", "description": "Process video for date"},
+        {"command": "uv run python -m opencontext.cli glass report --timeline-id <timeline>", "description": "Generate report"}
+      ],
+      "frontend": [
+        {"command": "cd webui && npm install", "description": "Install frontend dependencies"},
+        {"command": "cd webui && npm run dev", "description": "Start development server"},
+        {"command": "cd webui && npm run build", "description": "Production build"}
+      ],
+      "desktop": [
+        {"command": "npm run electron-dev", "description": "Development mode with hot reload"},
+        {"command": "npm run build", "description": "Production build and package"}
+      ]
+    },
+    "testing": [
+      {"command": "uv run pytest", "description": "Run all tests"},
+      {"command": "npm run start", "description": "Start development services"}
+    ]
+  },
+  "integration_flows": {
+    "video_processing": "Video Files → FFmpeg → Frame Extraction + Audio → AUC Turbo → Transcript → Timeline Context → Storage",
+    "report_generation": "Timeline Context → Visual Encoder → Doubao VLM → Smart Analysis → Markdown Report",
+    "frontend_backend": "React UI → HTTP API → FastAPI → Context Services → Storage (ChromaDB + SQLite)"
+  },
+  "performance": {
+    "optimizations": [
+      "ChromaDB with local persistence for fast semantic search",
+      "Configurable batch sizes for document and screenshot processing",
+      "Full async/await support throughout the pipeline",
+      "Automatic cleanup and retention policies",
+      "Multi-level caching for embeddings, API responses, and completions"
+    ]
+  },
+  "security": {
+    "features": [
+      "Local-first processing with no cloud dependencies",
+      "No telemetry or analytics collection",
+      "Environment variable-based credential management",
+      "Sandboxed file access with explicit path configuration",
+      "macOS application signing for distribution security"
+    ]
+  },
+  "metadata": {
+    "total_files_analyzed": 58,
+    "code_files": 45,
+    "test_files": 25,
+    "documentation_files": 20,
+    "configuration_files": 5,
+    "index_size_bytes": 3072,
+    "token_efficiency": "94% reduction from full codebase read"
+  }
+}
