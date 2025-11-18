@@ -5,8 +5,10 @@ const path = require('path');
 let mainWindow;
 let backendProcess;
 let backendPort;
+let frontendPort = 5174; // 默认端口，Vite 会自动切换
 
 function createWindow() {
+    console.log('🚀 创建 Electron 主窗口...');
     mainWindow = new BrowserWindow({
         width: 1200,
         height: 800,
@@ -21,6 +23,7 @@ function createWindow() {
         show: false  // 先不显示，等后端启动
     });
 
+    console.log('📡 启动后端服务...');
     // 启动后端
     startBackend();
 
@@ -28,15 +31,42 @@ function createWindow() {
     const checkBackend = setInterval(() => {
         if (backendPort) {
             clearInterval(checkBackend);
-            console.log(`后端已启动，端口: ${backendPort}`);
+            console.log(`✅ 后端已启动，端口: ${backendPort}`);
+            console.log(`🌐 开始连接前端服务器...`);
 
             // 加载前端
-            if (process.env.NODE_ENV === 'development') {
-                // 开发模式：连接到Vite开发服务器
-                mainWindow.loadURL(`http://localhost:5174?backend_port=${backendPort}`);
+            console.log(`🔍 检查环境变量: NODE_ENV = ${process.env.NODE_ENV}`);
+            if (process.env.NODE_ENV === 'development' || true) {  // 临时强制开发模式
+                console.log('🔧 开发模式：智能检测Vite开发服务器端口');
+                // 开发模式：智能检测Vite开发服务器端口
+                const tryLoadFrontend = async (startPort) => {
+                    for (let port = startPort; port < 5185; port++) {
+                        try {
+                            console.log(`尝试连接前端端口 ${port}，后端端口: ${backendPort}...`);
+                            await mainWindow.loadURL(`http://localhost:${port}?backend_port=${backendPort}`);
+                            console.log(`✅ 成功连接到前端端口 ${port}`);
+                            frontendPort = port;
+
+                            // 发送后端就绪信号到前端
+                            mainWindow.webContents.once('did-finish-load', () => {
+                                console.log('📡 前端加载完成，发送后端端口信息');
+                                mainWindow.webContents.send('backend-ready', backendPort);
+                            });
+
+                            return;
+                        } catch (error) {
+                            console.log(`❌ 端口 ${port} 连接失败，尝试下一个端口...`);
+                            // 继续尝试下一个端口
+                        }
+                    }
+                    throw new Error('无法连接到前端开发服务器，请确保 npm run dev 正在运行');
+                };
+
+                // 从5174开始尝试（默认Vite端口）
+                tryLoadFrontend(5174);
             } else {
                 // 生产模式：加载构建的静态文件
-                mainWindow.loadFile(path.join(__dirname, '../webui/dist/index.html'));
+                mainWindow.loadFile(path.join(__dirname, '../frontend/dist/index.html'));
             }
 
             mainWindow.show();
@@ -80,12 +110,19 @@ function startBackend() {
 
     backendProcess.stderr.on('data', (data) => {
         const output = data.toString();
-        console.error(`Backend Error: ${output}`);
 
-        // 解析错误信息
-        const errorMatch = output.match(/BACKEND_ERROR:(.+)/);
-        if (errorMatch) {
-            mainWindow.webContents.send('backend-error', errorMatch[1]);
+        // 区分错误和普通日志
+        if (output.includes('ERROR:') || output.includes('Error:') || output.includes('error:')) {
+            console.error(`Backend Error: ${output}`);
+
+            // 解析错误信息
+            const errorMatch = output.match(/BACKEND_ERROR:(.+)/);
+            if (errorMatch) {
+                mainWindow.webContents.send('backend-error', errorMatch[1]);
+            }
+        } else {
+            // 普通日志也显示为 stdout
+            console.log(`Backend: ${output}`);
         }
     });
 
@@ -104,6 +141,14 @@ function startBackend() {
 
 // IPC处理程序
 ipcMain.handle('get-backend-port', () => backendPort);
+
+ipcMain.handle('check-backend-status', () => {
+    return {
+        running: !!backendProcess && !backendProcess.killed,
+        port: backendPort,
+        pid: backendProcess ? backendProcess.pid : null
+    };
+});
 
 ipcMain.handle('restart-backend', async () => {
     if (backendProcess) {
