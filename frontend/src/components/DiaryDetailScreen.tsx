@@ -58,30 +58,15 @@ export function DiaryDetailScreen({ onBack, onEdit, timelineId, reportId }: Diar
       try {
         setIsLoading(true);
 
-        if (reportId) {
-          // Load specific report
-          const reports = await glassApi.getDiaryReports(timelineId);
-          const report = reports.find(r => r.id === reportId);
-          if (report) {
-            setDiaryReport(report);
-          } else {
-            // Generate new report if not found
-            const newReport = await glassApi.generateReport({
-              timeline_id: timelineId,
-              style: 'casual',
-              length: 'detailed'
-            });
-            setDiaryReport(newReport);
-          }
-        } else {
-          // Generate new report
-          const newReport = await glassApi.generateReport({
-            timeline_id: timelineId,
-            style: 'casual',
-            length: 'detailed'
-          });
-          setDiaryReport(newReport);
-        }
+        // Always generate a new report for now
+        // TODO: Implement caching/report loading in the future
+        // Fixed: Removed invalid API call to getDiaryReports
+        const newReport = await glassApi.generateReport({
+          timeline_id: timelineId,
+          style: 'casual',
+          length: 'detailed'
+        });
+        setDiaryReport(newReport);
       } catch (error) {
         console.error('Failed to load diary report:', error);
         toast.error("Failed to load diary report");

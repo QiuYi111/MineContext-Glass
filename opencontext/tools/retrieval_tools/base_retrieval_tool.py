@@ -47,11 +47,18 @@ class BaseRetrievalTool(BaseTool):
         build_filter = {}
         if filters.time_range is not None and filters.time_range.time_type:
             time_type = filters.time_range.time_type
-            build_filter[time_type] = {}
+
+            # Simple time range filtering - let ChromaDB backend handle $and logic
             if filters.time_range.start:
-                build_filter[time_type]["$gte"] = filters.time_range.start
+                build_filter[time_type] = {"$gte": filters.time_range.start}
             if filters.time_range.end:
-                build_filter[time_type]["$lte"] = filters.time_range.end
+                if time_type in build_filter:
+                    # Both start and end - combine in single condition
+                    build_filter[time_type]["$lte"] = filters.time_range.end
+                else:
+                    # Only end time
+                    build_filter[time_type] = {"$lte": filters.time_range.end}
+
         if filters.entities is not None and filters.entities:
             # Use Profile entity tool to handle entity unification
             unify_result = self.profile_entity_tool.execute(

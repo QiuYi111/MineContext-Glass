@@ -136,12 +136,65 @@ def get_all_timelines(
 def get_status(
     timeline_id: str,
     ingestion: GlassIngestionService = Depends(_get_ingestion_service),
+    repository: GlassContextRepository = Depends(_get_repository),
+    report_service: DailyReportService = Depends(_get_report_service),
 ) -> dict:
     try:
+        # Get basic status
         status = ingestion.get_status(timeline_id)
+
+        # Enhanced status with progress details
+        response_data = {
+            "timeline_id": timeline_id,
+            "status": status.value,
+            "progress": 0,
+            "current_step": "准备中...",
+            "total_steps": 4,
+            "message": ""
+        }
+
+        # Map status to progress details
+        if status.value == "pending":
+            response_data.update({
+                "progress": 0,
+                "current_step": "等待开始处理...",
+                "message": "任务已提交，等待开始处理"
+            })
+        elif status.value == "processing":
+            response_data.update({
+                "progress": 50,  # Estimate 50% during processing
+                "current_step": "正在处理视频内容...",
+                "message": "正在提取视频帧和转录语音"
+            })
+        elif status.value == "completed":
+            # Check if data is actually ready for consumption
+            envelope = repository.load_envelope(timeline_id)
+            if envelope is not None:
+                response_data.update({
+                    "progress": 100,
+                    "current_step": "处理完成",
+                    "message": "视频处理完成，数据已准备就绪",
+                    "status": "ready"  # Use different status to indicate data is ready
+                })
+            else:
+                # Ingestion completed but data not yet processed
+                response_data.update({
+                    "progress": 85,
+                    "current_step": "正在处理时间线数据...",
+                    "message": "视频处理完成，正在生成时间线上下文",
+                    "status": "finalizing"  # New intermediate status
+                })
+        elif status.value == "failed":
+            response_data.update({
+                "progress": 0,
+                "current_step": "处理失败",
+                "message": "视频处理过程中出现错误"
+            })
+
     except TimelineNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return convert_resp({"timeline_id": timeline_id, "status": status.value})
+
+    return convert_resp(response_data)
 
 
 @router.get("/context/{timeline_id}")

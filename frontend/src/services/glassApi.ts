@@ -309,7 +309,25 @@ class GlassApiService {
    */
   async generateReport(request: ReportGenerationRequest): Promise<DiaryReport> {
     try {
-      // Try the Glass-specific report endpoint first
+      // First, generate the report
+      const generateResponse = await fetch(`${this.baseUrl}/glass/report/${request.timeline_id}/generate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          report_type: 'standard',
+          include_visual_analysis: true,
+          language: 'zh'
+        })
+      });
+
+      if (generateResponse.ok) {
+        const generateResult = await generateResponse.json();
+        console.log('Report generated successfully:', generateResult);
+      }
+
+      // Then, get the generated report
       const response = await fetch(`${this.baseUrl}/glass/report/${request.timeline_id}`);
       if (response.ok) {
         const result = await response.json();
@@ -330,7 +348,7 @@ class GlassApiService {
         };
       }
     } catch (error) {
-      console.log('Glass report endpoint failed:', error);
+      console.log('Glass report generation failed:', error);
     }
 
     // Fallback to using the context endpoint which should have the processed data

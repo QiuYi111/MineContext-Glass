@@ -62,14 +62,19 @@ class BaseContextRetrievalTool(BaseTool):
         """Build filter conditions for storage backend"""
         build_filter = {}
 
-        # Time range filter
+        # Time range filter - Simple filtering, let ChromaDB backend handle $and logic
         if filters.time_range is not None and filters.time_range.time_type:
             time_type = filters.time_range.time_type
-            build_filter[time_type] = {}
+
             if filters.time_range.start:
-                build_filter[time_type]["$gte"] = filters.time_range.start
+                build_filter[time_type] = {"$gte": filters.time_range.start}
             if filters.time_range.end:
-                build_filter[time_type]["$lte"] = filters.time_range.end
+                if time_type in build_filter:
+                    # Both start and end - combine in single condition
+                    build_filter[time_type]["$lte"] = filters.time_range.end
+                else:
+                    # Only end time
+                    build_filter[time_type] = {"$lte": filters.time_range.end}
 
         # Entity filter with normalization
         if filters.entities is not None and filters.entities:

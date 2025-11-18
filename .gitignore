@@ -26,3 +26,4 @@ webui/.env.local
 webui/.env.development.local
 webui/.env.test.local
 webui/.env.production.local
+node_modules/*
